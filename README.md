@@ -34,3 +34,11 @@ Deep Reinforcement Learning Experiments with lerobot
         * I dont really care about pushing right now
         * After you find the location, it seems like the actual execution of trajectory is still done by kinematics
         * Needs depth camera, performance much worse with just RGB camera
+     
+
+### Chosen algorithm:
+* DDPG with Hindsight Experience Replay
+  * Task: 
+  * Action space:
+  * Observation Space
+  * Reward Function
