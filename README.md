@@ -10,6 +10,7 @@ Deep Reinforcement Learning Experiments with lerobot
 1. RGB cameras only for now
 2. Lerobot
 3. Task should be reproducible in sim
+4. Prefarably the network controls the robot directly and doesnt need kinematics to execute the task
 
 ### Options:
 1. Deep Spatial Autoencoders for Visuomotor Learning
@@ -26,3 +27,10 @@ Deep Reinforcement Learning Experiments with lerobot
     * Lots of example implementations available online
     * Doesnt need reward shaping, can work with sparse rewards
     * Sim to Real experiments also in the paper
+
+3. Learning Synergies between Pushing and Grasping with Self-supervised Deep Reinforcement Learning
+    * Learn two networks, one for pushing and one for grasping which take in camera images and output the expected utility of pushing/ grasping with each motion primitive
+    * Concerns:
+        * I dont really care about pushing right now
+        * After you find the location, it seems like the actual execution of trajectory is still done by kinematics
+        * Needs depth camera, performance much worse with just RGB camera
