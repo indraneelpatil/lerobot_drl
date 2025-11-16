@@ -24,3 +24,4 @@ Deep Reinforcement Learning Experiments with lerobot
     * Concerns:
       * DQN needs a discrete action space so not sure how that extends to lerobot
     * Lots of example implementations available online
+    * Doesnt need reward shaping, can work with sparse rewards
