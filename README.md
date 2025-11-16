@@ -18,3 +18,9 @@ Deep Reinforcement Learning Experiments with lerobot
        * RL algorithm looks quite convoluted
        * Implementation looks complex of the autoencoder and the RL algorithm
        * No code available as reference
+
+2. Hindsight Experience Replay
+  * Can be used with any off policy RL algorithm like DQN and DDPG and helps make RL faster by relabelling goals
+  * Concerns:
+    * DQN needs a discrete action space so not sure how that extends to lerobot
+  * Lots of example implementations available online
