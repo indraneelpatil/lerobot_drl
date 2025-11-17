@@ -44,10 +44,10 @@ Deep Reinforcement Learning Experiments with lerobot
         * After you find the location, it seems like the actual execution of trajectory is still done by kinematics
         * Needs depth camera, performance much worse with just RGB camera
 4. CONTINUOUS CONTROL WITH DEEP REINFORCEMENT LEARNING
-  * Actor-Critic model free algorithm that can operate in continuous action spaces based on DDPG
-  * Can learn policies end to end
-  * Concerns:
-      * All experiments in paper are on low dimensional robot, no experiments on high DOF manipulators, may work may not work
+    * Actor-Critic model free algorithm that can operate in continuous action spaces based on DDPG
+    * Can learn policies end to end
+    * Concerns:
+        * All experiments in paper are on low dimensional robot, no experiments on high DOF manipulators, may work may not work
 5. Precise and Dexterous Robotic Manipulation via Human-in-the-Loop Reinforcement Learning
      
 
