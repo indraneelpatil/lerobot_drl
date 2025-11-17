@@ -49,6 +49,7 @@ Deep Reinforcement Learning Experiments with lerobot
     * Concerns:
         * All experiments in paper are on low dimensional robot, no experiments on high DOF manipulators, may work may not work
 5. Precise and Dexterous Robotic Manipulation via Human-in-the-Loop Reinforcement Learning
+   * https://huggingface.co/docs/lerobot/en/hilserl
      
 
 ### Chosen algorithm:
