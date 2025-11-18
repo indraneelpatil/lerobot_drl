@@ -85,4 +85,8 @@ Deep Reinforcement Learning Experiments with lerobot
 1. Franka Panda Simulation with Mujoco (https://huggingface.co/docs/lerobot/en/hilserl_sim)
    * Fast setup of the code and try to get something to work
 2. (Maybe) Switch to issac sim with lerobot
-3. Hardware Testing with lerobot
+   * Before going on hardware it would be useful to test with lerobot in sim
+4. Hardware Testing with lerobot
+   * GOAL: Dont break the robot
+   * Initially try to get something simple to work like picking up a block from anywhere in the workspace
+   * Then try to do the popcorn cleaning task 
