@@ -49,7 +49,24 @@ Deep Reinforcement Learning Experiments with lerobot
     * Concerns:
         * All experiments in paper are on low dimensional robot, no experiments on high DOF manipulators, may work may not work
 5. Precise and Dexterous Robotic Manipulation via Human-in-the-Loop Reinforcement Learning
+   * Called HIL-SERL (Human in the Loop Sample Efficient Robotic Reinforcement Learning)
+   * 1 to 2.5 hours of training time and out performs IL baselines
+   * Use a binary classifier as a sparse reward signal
+   * Collect some demonstrations for the demo buffer
+   * Train using RL and human interventions
+     * Use a pretrained visual backbone for policy learning
+     * Off policy RL algorithm that incorporates human demonstrations and corrections
    * https://huggingface.co/docs/lerobot/en/hilserl
+   * Reward function: Trained Binary Classifier
+   * RL Algorithm: RLPD (Off policy)
+   * Observation space: Images from wirst mounted and side cameras, end affector poses, twists, forces/ torques and current gripper status of both arms
+   * Action Space: Direct feedforward wrenches in end affector frame (desired accelerations)
+   * Action Space 2: 6D Cartesian twist target for downstream impedance controller + discrete control for gripper
+   * ResNet-10 model pretrained on ImageNet
+   * Ego centric formulation: Action output from policy is relative to current end affector frame
+   * Gripper control is treated as a separate MDP and controlled by separate network
+   * Wrist cameras are useful for providing spatial generalisation of the policy due to the ego centric views they provide
+   * But wrist cameras alone dont provide a full view of the environment
      
 
 ### Chosen algorithm:
