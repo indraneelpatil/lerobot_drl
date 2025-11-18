@@ -48,7 +48,7 @@ Deep Reinforcement Learning Experiments with lerobot
     * Can learn policies end to end
     * Concerns:
         * All experiments in paper are on low dimensional robot, no experiments on high DOF manipulators, may work may not work
-5. Precise and Dexterous Robotic Manipulation via Human-in-the-Loop Reinforcement Learning
+5. Precise and Dexterous Robotic Manipulation via Human-in-the-Loop Reinforcement Learning (https://huggingface.co/docs/lerobot/en/hilserl)
    * Called HIL-SERL (Human in the Loop Sample Efficient Robotic Reinforcement Learning)
    * 1 to 2.5 hours of training time and out performs IL baselines
    * Use a binary classifier as a sparse reward signal
@@ -56,7 +56,6 @@ Deep Reinforcement Learning Experiments with lerobot
    * Train using RL and human interventions
      * Use a pretrained visual backbone for policy learning
      * Off policy RL algorithm that incorporates human demonstrations and corrections
-   * https://huggingface.co/docs/lerobot/en/hilserl
    * Reward function: Trained Binary Classifier
    * RL Algorithm: RLPD (Off policy)
    * Observation space: Images from wirst mounted and side cameras, end affector poses, twists, forces/ torques and current gripper status of both arms
@@ -70,12 +69,20 @@ Deep Reinforcement Learning Experiments with lerobot
      
 
 ### Chosen algorithm:
-* TODO
-  * Task: 
-  * Action space: Relative gripper position at next timestep and gripper position (4d)
-  * Observation Space: Joint positions and velocities of the robot, positions and rotations of all objects, all object positions are relative to the gripper position
-  * Goals: Desired positions of objects
-  * Reward Function
+* Precise and Dexterous Robotic Manipulation via Human-in-the-Loop Reinforcement Learning 
+  * Task:
+    1. (Initially) Pick and lift up a block with the gripper
+    2. (Next) Clean all the popcorn from the table
+  * Action Space:
+    1. (Initially) Direct feedforward wrenches in end affector frame (desired accelerations)
+    2. (Next) Can we later try joint positions instead to avoid the IK?
+  * Observation Space: Images from wirst mounted and top cameras, end affector poses, twists, gripper status
+  * Reward Function:
+    1. (Initially) Manual labelling
+    2. (Next) Binary vision classifier
 
 ### Next steps
-* TODO
+1. Franka Panda Simulation with Mujoco (https://huggingface.co/docs/lerobot/en/hilserl_sim)
+   * Fast setup of the code and try to get something to work
+2. (Maybe) Switch to issac sim with lerobot
+3. Hardware Testing with lerobot
