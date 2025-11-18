@@ -11,7 +11,7 @@ Deep Reinforcement Learning Experiments with lerobot
 1. RGB cameras only for now
 2. Lerobot
 3. Task should be reproducible in sim
-4. Preferably the network controls the robot directly and doesnt need kinematics to execute the task
+4. (Optional) Preferably the network controls the robot directly and doesnt need kinematics to execute the task
 
 ### Options:
 1. Deep Spatial Autoencoders for Visuomotor Learning
