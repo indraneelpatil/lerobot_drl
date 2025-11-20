@@ -76,7 +76,7 @@ Deep Reinforcement Learning Experiments with lerobot
   * Action Space:
     1. (Initially) Direct feedforward wrenches in end affector frame (desired accelerations)
     2. (Next) Can we later try joint positions instead to avoid the IK?
-  * Observation Space: Images from wirst mounted and top cameras, end affector poses, twists, gripper status
+  * Observation Space: Images from wrist mounted and top cameras, end affector poses, twists, gripper status
   * Reward Function:
     1. (Initially) Manual labelling
     2. (Next) Binary vision classifier
@@ -89,4 +89,19 @@ Deep Reinforcement Learning Experiments with lerobot
 4. Hardware Testing with lerobot
    * GOAL: Dont break the robot
    * Initially try to get something simple to work like picking up a block from anywhere in the workspace
-   * Then try to do the popcorn cleaning task 
+   * Then try to do the popcorn cleaning task
+  
+### Schedule
+| Stage                | Task                                   | Effort    | - |
+|-----------------------|---------------------------------------|-----------|------------|
+| Mujoco Simulation     |  Implement gym_manipulator.py         | 5 hours   |    -       |
+| Mujoco Simulation     |  Implement actor.py                   | 5 hours   |-           |
+| Mujoco Simulation     |  Implement learner.py                 | 5 hours   |-           |
+| Isaac Sim Simulation  |  Add Isaac Sim Gym Environment        | 5 hours   |-        |
+| LeRobot Hardware      |  Add hardware code to gym_manipulator | 3 hours   |-           |
+| LeRobot Hardware      | Sim to Real Inference                 |  3 hours  | -        |
+| LeRobot Hardware      | RL on hardware with intervention      | 3 hours   |-           |
+| LeRobot Hardware      | Retry for popcorn task                | 8 hours   |-           |
+| Total                 | -                                     | 45 hours  |-           |
+
+
