@@ -10,6 +10,8 @@ Gym environment for mujoco
 import logging
 from dataclasses import dataclass
 from typing import Any
+import time
+import torch
 
 import gymnasium as gym
 from lerobot.configs import parser
@@ -24,8 +26,14 @@ from lerobot.processor import (
     Torch2NumpyActionProcessorStep,
     Numpy2TorchActionProcessorStep,
     VanillaObservationProcessorStep,
+    create_transition,
+    TransitionKey
 )
 from lerobot.processor.converters import identity_transition
+from lerobot.utils.robot_utils import busy_wait
+from lerobot.teleoperators import (
+    keyboard
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -103,6 +111,49 @@ def make_processors(
     raise NotImplementedError("Real robot processors not implemented")
 
 
+def step_env_and_process_transition(
+    env: gym.Env,
+    transition: EnvTransition,
+    action: torch.Tensor,
+    env_processor: DataProcessorPipeline[EnvTransition, EnvTransition],
+    action_processor: DataProcessorPipeline[EnvTransition, EnvTransition],
+) -> EnvTransition:
+    """
+    Execute one step with processor pipeline
+    """
+
+    # Create action transition
+    transition[TransitionKey.ACTION] = action
+    transition[TransitionKey.OBSERVATION] = (
+        env.get_raw_joint_positions() if hasattr(env, "get_raw_joint_positions") else {}
+    )
+    processed_action_transition = action_processor(transition)
+    processed_action = processed_action_transition[TransitionKey.ACTION]
+
+    obs, reward, terminated, truncated, info = env.step(processed_action)
+
+    reward = reward + processed_action_transition[TransitionKey.REWARD]
+    terminated = terminated or processed_action_transition[TransitionKey.DONE]
+    truncated = truncated or processed_action_transition[TransitionKey.TRUNCATED]
+    complementary_data= processed_action_transition[TransitionKey.COMPLEMENTARY_DATA]
+    new_info = processed_action_transition[TransitionKey.INFO].copy()
+    new_info.update(info)
+
+    new_transition = create_transition(
+        observation=obs.
+        action=processed_action,
+        reward=reward,
+        done=terminated,
+        truncated=truncated,
+        info=new_info,
+        complementary_data=complementary_data
+    )
+    new_transition = env_processor(new_transition)
+
+    return new_transition
+
+
+
 def control_loop(env: gym.Env, 
                  env_processor: DataProcessorPipeline[EnvTransition, EnvTransition],
                  action_processor: DataProcessorPipeline[EnvTransition, EnvTransition],
@@ -126,7 +177,66 @@ def control_loop(env: gym.Env,
     env_processor.reset()
     action_processor.reset()
 
-    pass
+    # Process initial observation
+    transition = create_transition(observation=obs, info=info, complementary_data=complimentary_data)
+    transition = env_processor(data=transition)
+
+    # Check gripper
+    use_gripper = cfg.env.processor.gripper.use_gripper if cfg.env.processor.gripper is not None else True
+
+    # TODO: Implement record
+
+    episode_idx = 0
+    episode_step = 0
+    episode_start_time = time.perf_counter()
+
+    while episode_idx < cfg.dataset.num_episodes_to_record:
+        step_start_time = time.perf_counter()
+
+        # Create a neutral action 
+        neutral_action = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
+        if use_gripper:
+            neutral_action = torch.cat([neutral_action, torch.tensor([1.0])]) # Gripper stay
+        
+        # Use the new step function
+        transition = step_env_and_process_transition(
+            env=env,
+            transition=transition,
+            action=neutral_action,
+            env_processor=env_processor,
+            action_processor=action_processor,
+        )
+        terminated = transition.get(TransitionKey.DONE, False)
+        truncated = transition.get(TransitionKey.TRUNCATED, False)
+
+        # TODO Record mode stuff
+
+        episode_step += 1
+
+        # Handle termination
+        if terminated or truncated:
+            episode_time = time.perf_counter() - episode_start_time
+            logging.info(
+                f"Episode ended after {episode_step} steps in {episode_time:.1f}s with reward {transition[TransitionKey.REWARD]}"            
+            )
+            episode_step = 0
+            episode_idx += 1
+
+            # TODO Dataset stuff
+
+            # Reset for new episode
+            obs, info = env.reset()
+            env_processor.reset()
+            action_processor.reset()
+
+
+            transition = create_transition(observation=obs, info=info)
+            transition = env_processor(transition)
+
+        # Maintain fps timing
+        busy_wait(dt -(time.perf_counter() - step_start_time))
+
+    # TODO Push dataset
 
 @parser.wrap()
 def main(cfg: GymManipulatorConfig) -> None:
@@ -141,7 +251,7 @@ def main(cfg: GymManipulatorConfig) -> None:
 
     # TODO Implement replay mode
 
-    control_loop()
+    control_loop(env, env_processor, action_processor, teleop_device, cfg)
     
 
 
