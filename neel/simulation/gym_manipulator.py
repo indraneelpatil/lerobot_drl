@@ -5,6 +5,8 @@ Created by Indraneel on 11/19/2025
 
 Gym environment for mujoco
 
+python simulation/gym_manipulator.py --config_path simulation/config/gym_hil_env.json
+
 """
 
 import logging
@@ -140,7 +142,7 @@ def step_env_and_process_transition(
     new_info.update(info)
 
     new_transition = create_transition(
-        observation=obs.
+        observation=obs,
         action=processed_action,
         reward=reward,
         done=terminated,
