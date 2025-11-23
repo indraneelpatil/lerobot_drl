@@ -264,17 +264,17 @@ def control_loop(env: gym.Env,
                 if isinstance(v, torch.Tensor)
             }
             # Use teleop_action if available, otherwise use the action from the transition
-            action_to_record = transition[TransitionKey.COMPLEMENTARY_DATA].get(
+            action_to_record = transition[TransitionKey.INFO].get(
                 "teleop_action", transition[TransitionKey.ACTION]
             )
             frame = {
                 **observations,
-                ACTION: action_to_record.cpu(),
+                ACTION: action_to_record.cpu() if isinstance(action_to_record, torch.Tensor) else action_to_record.astype(np.float32),
                 REWARD: np.array([transition[TransitionKey.REWARD]], dtype=np.float32),
                 DONE: np.array([terminated or truncated], dtype=bool)
             }
             if use_gripper:
-                discrete_penalty = transition[TransitionKey.COMPLEMENTARY_DATA].get("discrete_penalty", 0.0)
+                discrete_penalty = transition[TransitionKey.INFO].get("discrete_penalty", 0.0)
                 frame["complementary_info.discrete_penalty"] = np.array([discrete_penalty], dtype=np.float32)
             
             if dataset is not None:
