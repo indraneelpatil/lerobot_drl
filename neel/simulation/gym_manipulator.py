@@ -81,6 +81,7 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig) -> tuple[gym.Env, Any]:
             render_mode="human",
             use_gripper=use_gripper,
             gripper_penalty=gripper_penalty,
+            random_block_position=True,
         )
 
         return env, None
@@ -237,7 +238,7 @@ def control_loop(env: gym.Env,
 
     print("############################## Starting control loop")
     while episode_idx < cfg.dataset.num_episodes_to_record:
-        print(f"#################### On step {episode_step} in episode {episode_idx}")
+        # print(f"#################### On step {episode_step} in episode {episode_idx}")
         step_start_time = time.perf_counter()
 
         # Create a neutral action 
