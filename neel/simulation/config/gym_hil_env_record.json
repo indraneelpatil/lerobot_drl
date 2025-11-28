@@ -27,7 +27,7 @@
         }
     },
     "dataset": {
-        "repo_id": "indraneelpatil/franka_sim_pick_lift_sim",
+        "repo_id": "indraneelpatil/franka_sim_pick_lift_sim4",
         "root": null,
         "task": "PandaPickCubeKeyboard-v0",
         "num_episodes_to_record": 30,
