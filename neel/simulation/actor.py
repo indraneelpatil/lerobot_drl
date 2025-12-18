@@ -10,6 +10,7 @@ import logging
 from functools import lru_cache
 import grpc
 import time
+from queue import Empty
 
 from torch import nn
 from torch.multiprocessing import Event, Queue
@@ -22,7 +23,8 @@ from lerobot.utils.utils import (
 from lerobot.rl.process import ProcessSignalHandler
 from lerobot.transport.utils import (
     grpc_channel_options,
-    receive_bytes_in_chunks
+    receive_bytes_in_chunks,
+    send_bytes_in_chunks
 )
 from lerobot.transport import services_pb2, services_pb2_grpc
 
@@ -220,6 +222,106 @@ def receive_policy(
     if not use_threads(cfg):
         grpc_channel.close()
     logging.info("[ACTOR] Received policy loop stopped")
+
+
+def send_transitions(
+        cfg: TrainRLServerPipelineConfig,
+        transitions_queue: Queue,
+        shutdown_event: any, # Event
+        learner_client: services_pb2_grpc.LearnerServiceStub | None = None,
+        grpc_channel: grpc.Channel | None = None,
+) -> services_pb2.Empty:
+    """
+    Sends environment transitions to the learner
+    """
+    if not use_threads(cfg):
+        # Create a process specific log file
+        log_dir = os.path.join(cfg.output_dir, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, f"actor_transitions_{os.getpid()}.log")
+
+        # Initialize logging with explicit log file
+        init_logging(log_file=log_file, display_pid=True)
+        logging.info("Actor transitions process logging initialized")
+    
+    if grpc_channel is None or learner_client is None:
+        learner_client, grpc_channel = learner_service_client(
+            host=cfg.policy.actor_learner_config.learner_host,
+            port=cfg.policy.actor_learner_config.learner_port,
+        )
+
+    try:
+        learner_client.SendTransitions(
+            transitions_stream(
+                shutdown_event, transitions_queue, cfg.policy.actor_learner_config.queue_get_timeout
+            )
+        )
+    except grpc.RpcError as e:
+        logging.error(f"[ACTOR] gRPC error: {e}")
+
+    logging.info("[ACTOR] Finished streaming transitions")
+
+    if not use_threads(cfg):
+        grpc_channel.close()
+    logging.info("[ACTOR] Transitions process stopped")
+
+def transitions_stream(shutdown_event: Event, transitions_queue: Queue, timeout: float) -> services_pb2.Empty: # type: ignore
+    while not shutdown_event.is_set():
+        try:
+            message = transitions_queue.get(block=True, timeout=timeout)
+        except Empty:
+            logging.debug("[ACTOR] Transitions queue is empty")
+            continue
+        
+        yield from send_bytes_in_chunks(
+            message, services_pb2.Transition, log_prefix="[ACTOR] Send transitions"
+        )
+
+    return services_pb2.Empty()
+
+def send_interactions(
+    cfg: TrainRLServerPipelineConfig,
+    interactions_queue: Queue,
+    shutdown_event: Event, # type: ignore,
+    learner_client: services_pb2_grpc.LearnerServiceStub | None = None,
+    grpc_channel: grpc.Channel | None = None,
+) -> services_pb2.Empty:
+    """
+    Sends useful interaction stats to the learner
+    """
+
+    if not use_threads(cfg):
+        # Create a process specific log file
+        log_dir = os.path.join(cfg.output_dir, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, f"actor_interactions_{os.getpid()}.log")
+
+        # Initialize logging with explicit log file
+        init_logging(log_file=log_file, display_pid=True)
+        logging.info("Actor interactions process logging initialized")
+
+        # Setup process handlers to handle shutdown signal
+        _ = ProcessSignalHandler(use_threads=False, display_pid=True)
+    
+    if grpc_channel is None or learner_client is None:
+        learner_client, grpc_channel = learner_service_client(
+            host=cfg.policy.actor_learner_config.learner_host,
+            port=cfg.policy.actor_learner_config.learner_port
+        )
+
+    try:
+        learner_client.SendInteractions(
+            interactions_stream()
+        )
+    except grpc.RpcError as e:
+        logging.error(f"[ACTOR] gRPC error: {e}")
+
+    logging.info("[ACTOR] Finished streaming interactions")
+
+    if not use_threads(cfg):
+        grpc_channel.close()
+    logging.info("[ACTOR] Interactions process stopped")
+    
 
 
 
