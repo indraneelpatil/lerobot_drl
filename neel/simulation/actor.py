@@ -12,13 +12,15 @@ import grpc
 import time
 from queue import Empty
 
+import torch
 from torch import nn
 from torch.multiprocessing import Event, Queue
 
 from lerobot.configs import parser
 from lerobot.configs.train import TrainRLServerPipelineConfig
 from lerobot.utils.utils import (
-    init_logging
+    init_logging,
+    get_safe_torch_device
 )
 from lerobot.rl.process import ProcessSignalHandler
 from lerobot.transport.utils import (
@@ -27,6 +29,14 @@ from lerobot.transport.utils import (
     send_bytes_in_chunks
 )
 from lerobot.transport import services_pb2, services_pb2_grpc
+from .gym_manipulator import (
+    make_robot_env,
+    make_processors,
+    create_transition
+)
+from lerobot.utils.random_utils import set_seed
+from lerobot.policies.factory import make_policy
+from lerobot.policies.sac.modeling_sac import SACPolicy
 
 def use_threads(cfg: TrainRLServerPipelineConfig) -> bool:
     return cfg.policy.concurrency.actor == "threads"
@@ -137,6 +147,55 @@ def actor_cli(cfg: TrainRLServerPipelineConfig):
     logging.info("[ACTOR] queues closed")
     
 
+# Core algorithm 
+def act_with_policy(
+    cfg: TrainRLServerPipelineConfig,
+    shutdown_event: any, 
+    parameters_queue: Queue,
+    transitions_queue: Queue,
+    interactions_queue: Queue
+):
+    """
+    Executes policy interaction within the environment
+    """
+    # Initialize logging for multiprocessing
+    if not use_threads(cfg):
+        log_dir = os.path.join(cfg.output_dir, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, f"actor_policy_{os.getpid()}.log")
+        init_logging(log_file=log_file, display_pid=True)
+        logging.info("Actor policy process logging initialized")
+    
+    logging.info("make_env online")
+
+    online_env, teleop_device = make_robot_env(cfg=cfg.env)
+    env_processor, action_processor = make_processors(online_env, teleop_device, cfg.env, cfg.policy.device)
+
+    set_seed(cfg.seed)
+    device = get_safe_torch_device(cfg.policy.device, log=True)
+
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cuda.matmul.allow_tf32 = True
+
+    logging.info("make_policy")
+
+    ### Instantiate the policy in both the actor and learner processes
+    ### To avoid sending a SACPolicy Object through the port, we create a policy
+    ### instance on both sides and learner sends updated parameters every n steps
+    policy: SACPolicy = make_policy(
+        cfg=cfg.policy,
+        env_cfg=cfg.env
+    )
+    policy = policy.eval()
+    assert isinstance(policy, nn.Module)
+
+    obs, info = online_env.reset()
+    env_processor.reset()
+    action_processor.reset()
+
+    # Process initial observation
+    transition = create_transition(observation=obs, info=info)
+    transition = env_processor(transition)
 
 
 def establish_learner_connection(
@@ -321,7 +380,25 @@ def send_interactions(
     if not use_threads(cfg):
         grpc_channel.close()
     logging.info("[ACTOR] Interactions process stopped")
-    
+
+def interactions_stream(
+    shutdown_event: Event,
+    interactions_queue: Queue,
+    timeout: float,
+) -> services_pb2.Empty:
+    while not shutdown_event.is_set():
+        try:
+            message = interactions_queue.get(block=True, timeout=timeout)
+        except Empty:
+            logging.debug("[ACTOR] Interaction queue is empty")
+            continue
+        
+        yield from send_bytes_in_chunks(
+            message,
+            services_pb2.InteractionMessage,
+            log_prefix="[ACTOR] Send interactions"
+        )
+    return services_pb2.Empty()
 
 
 
