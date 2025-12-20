@@ -20,23 +20,39 @@ from lerobot.configs import parser
 from lerobot.configs.train import TrainRLServerPipelineConfig
 from lerobot.utils.utils import (
     init_logging,
-    get_safe_torch_device
+    get_safe_torch_device,
+    TimerManager
+)
+from lerobot.utils.robot_utils import busy_wait
+from lerobot.utils.random_utils import set_seed
+from lerobot.utils.transition import (
+    Transition,
+    move_transition_to_device
+)
+from lerobot.utils.transition import (
+    move_state_dict_to_device
 )
 from lerobot.rl.process import ProcessSignalHandler
+from lerobot.rl.queue import get_last_item_from_queue
 from lerobot.transport.utils import (
     grpc_channel_options,
     receive_bytes_in_chunks,
-    send_bytes_in_chunks
+    send_bytes_in_chunks,
+    python_object_to_bytes,
+    bytes_to_state_dict,
+    transitions_to_bytes
 )
 from lerobot.transport import services_pb2, services_pb2_grpc
 from .gym_manipulator import (
     make_robot_env,
     make_processors,
-    create_transition
+    create_transition,
+    step_env_and_process_transition
 )
-from lerobot.utils.random_utils import set_seed
 from lerobot.policies.factory import make_policy
 from lerobot.policies.sac.modeling_sac import SACPolicy
+from lerobot.processor import TransitionKey
+from lerobot.teleoperators.utils import TeleopEvents
 
 def use_threads(cfg: TrainRLServerPipelineConfig) -> bool:
     return cfg.policy.concurrency.actor == "threads"
@@ -196,6 +212,195 @@ def act_with_policy(
     # Process initial observation
     transition = create_transition(observation=obs, info=info)
     transition = env_processor(transition)
+
+    sum_reward_episode = 0
+    list_transition_to_send_to_learner = []
+    episode_intervention = False
+    
+    # Add counters for intervention rate calculation
+    episode_intervention_steps = 0
+    episode_total_steps = 0
+
+    policy_timer = TimerManager("Policy inference", log=False)
+
+    for interaction_step in range(cfg.policy.online_steps):
+        start_time = time.perf_counter()
+        if shutdown_event.is_set():
+            logging.info("[ACTOR] Shutting down act_with_policy")
+            return
+        
+        observation = {
+            k: v for k, v in transition[TransitionKey.OBSERVATION].items() if k in cfg.policy.input_features
+        }
+
+        # Time policy inference and check if it meets FPS requirement
+        with policy_timer:
+            # Extract observation from transition for policy
+            action = policy.select_action(batch=observation)
+        policy_fps = policy_timer.fps_last
+
+        log_policy_frequency_issue(policy_fps=policy_fps, cfg=cfg, interaction_step=interaction_step)
+
+        # Use the new step function
+        new_transition = step_env_and_process_transition(
+            env=online_env,
+            transition=transition,
+            action=action,
+            env_processor=env_processor,
+            action_processor=action_processor
+        )
+
+        # Extract values from processed transition
+        next_observation = {
+            k: v
+            for k,v in new_transition[TransitionKey.OBSERVATION].items()
+            if k in cfg.policy.input_features
+        }
+        
+        # Teleop action is the action that was executed in the environment
+        # It is either the action from the teleop device or the action from the policy
+        executed_action = new_transition[TransitionKey.COMPLEMENTARY_DATA]["teleop_action"]
+
+        reward = new_transition[TransitionKey.REWARD]
+        done = new_transition.get(TransitionKey.DONE, False)
+        truncated = new_transition.get(TransitionKey.TRUNCATED, False)
+
+        sum_reward_episode += float(reward)
+        episode_total_steps += 1
+
+        # Check for intervention from transition info
+        intervention_info = new_transition[TransitionKey.INFO]
+        if intervention_info.get(TeleopEvents.IS_INTERVENTION, False):
+            episode_intervention = True
+            episode_intervention_steps += 1
+        
+        complementary_info = {
+            "discrete_penalty": torch.tensor(
+                [new_transition[TransitionKey.COMPLEMENTARY_DATA].get("discrete_penalty", 0.0)]
+            )
+        }
+        # Create transition for learner (convert to old format)
+        list_transition_to_send_to_learner.append(
+            Transition(
+                state=observation,
+                action=executed_action,
+                reward=reward,
+                next_state=next_observation,
+                done=done,
+                truncated=truncated,
+                complementary_info=complementary_info,
+            )
+        )
+
+        # Update transition for next iteration
+        transition = new_transition
+
+        if done or truncated:
+            logging.info(f"[ACTOR] Global step {interaction_step}: Episode reward: {sum_reward_episode} ")
+
+            update_policy_parameters(policy=policy, parameters_queue=parameters_queue, device=device)
+
+            if len(list_transition_to_send_to_learner) > 0:
+                push_transitions_to_transport_queue(
+                    transitions=list_transition_to_send_to_learner,
+                    transitions_queue=transitions_queue
+                )
+                list_transition_to_send_to_learner = []
+            
+            stats = get_frequency_stats(policy_timer)
+            policy_timer.reset()
+
+            # Calculate intervention rate
+            intervention_rate = 0.0
+            if episode_total_steps > 0:
+                intervention_rate = episode_intervention_steps / episode_total_steps
+
+            # Send episodic reward to the learner
+            interactions_queue.put(
+                python_object_to_bytes(
+                    {
+                        "Episodic reward": sum_reward_episode,
+                        "Interaction step": interaction_step,
+                        "Episode intervention": int(episode_intervention),
+                        "Intervention rate": intervention_rate,
+                        **stats
+                    }
+                )
+            )
+
+            # Reset intervention counters and environment
+            sum_reward_episode = 0.0
+            episode_intervention = False
+            episode_intervention_steps = 0
+            episode_total_steps = 0
+
+            # Reset environment and processors
+            obs, info = online_env.reset()
+            env_processor.reset()
+            action_processor.reset()
+
+            # Process initial observation
+            transition = create_transition(observation=obs, info=info)
+            transition = env_processor(transition)
+
+        if cfg.env.fps is not None:
+            dt_time = time.perf_counter() - start_time
+            busy_wait(1 / cfg.env.fps - dt_time)
+        
+
+def log_policy_frequency_issue(policy_fps: float, cfg: TrainRLServerPipelineConfig, interaction_step: int):
+    if policy_fps < cfg.env.fps:
+        logging.warning(
+            f"[ACTOR] Policy FPS {policy_fps:.1f} below required {cfg.env.fps} at step {interaction_step}"
+        )
+
+
+def update_policy_parameters(policy: SACPolicy, parameters_queue: Queue, device):
+    bytes_state_dict = get_last_item_from_queue(parameters_queue, block=False)
+    if bytes_state_dict is not None:
+        logging.info("[ACTOR] Load new parameters from learner.")
+        state_dicts = bytes_to_state_dict(bytes_state_dict)
+
+        # Load actor state dict
+        actor_state_dict = move_state_dict_to_device(state_dicts["policy"], device=device)
+        policy.actor.load_state_dict(actor_state_dict)
+
+        # Load discrete critic if present
+        if hasattr(policy, "discrete_critic") and "discrete_critic" in state_dicts:
+            discrete_critic_state_dict = move_state_dict_to_device(
+                state_dicts["discrete_critic"], device=device
+            )
+            policy.discrete_critic.load_state_dict(discrete_critic_state_dict)
+            logging.info("[ACTOR] Loaded discrete critic parameters from Learner.")
+
+
+def push_transitions_to_transport_queue(transitions: list, transitions_queue):
+    """Send transitions to learner in smaller chunks to avoid network issues"""
+    transition_to_send_to_learner = []
+    for transition in transitions:
+        tr = move_transition_to_device(transition=transition, device="cpu")
+        for key, value in tr["state"].items():
+            if torch.isnan(value).any():
+                logging.warning(f"Found NaN values in transition {key}")
+
+        transition_to_send_to_learner.append(tr)
+    
+    transitions_queue.put(transitions_to_bytes(transition_to_send_to_learner))
+
+
+def get_frequency_stats(timer: TimerManager) -> dict[str, float]:
+    """Get the frequency statistics of the policy"""
+    stats = {}
+    if timer.count > 1:
+        avg_fps = timer.fps_avg
+        p90_fps = timer.fps_percentile(90)
+        logging.debug(f"[ACTOR] Average policy frame rate: {avg_fps}")
+        logging.debug(f"[ACTOR] Policy frame rate 90th percentile: {p90_fps}")
+        stats = {
+            "Policy frequency [Hz]": avg_fps,
+            "Policy frequency 90th-p [Hz]": p90_fps
+        }
+    return stats
 
 
 def establish_learner_connection(
