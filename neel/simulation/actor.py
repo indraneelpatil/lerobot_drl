@@ -81,7 +81,7 @@ def actor_cli(cfg: TrainRLServerPipelineConfig):
 
     # Create the grpc server 
     learner_client, grpc_channel = learner_service_client(
-        host=cfg.policy.actor_learner_config.learner_host.
+        host=cfg.policy.actor_learner_config.learner_host,
         port=cfg.policy.actor_learner_config.learner_port,
     )
 
