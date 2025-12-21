@@ -4,6 +4,8 @@ Created by Indraneel on 12/15/2025
 
 Actor process to interact with environment with current policy and collect interactions
 
+
+python -m simulation.actor --config_path simulation/config/gym_hil_env_train.json
 """
 import os
 import logging
@@ -427,7 +429,7 @@ def establish_learner_connection(
     return False 
 
 # Run function only once and cache the result
-@lru_cache(max_size=1)
+@lru_cache(maxsize=1)
 def learner_service_client(
     host: str = "127.0.0.1",
     port: int = 50051,
