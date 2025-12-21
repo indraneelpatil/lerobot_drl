@@ -10,6 +10,8 @@ import logging
 import os
 
 from termcolor import colored
+import torch
+from torch.multiprocessing import Queue
 
 from lerobot.configs.train import TrainRLServerPipelineConfig
 from lerobot.configs import parser
@@ -23,6 +25,9 @@ from lerobot.utils.constants import (
     PRETRAINED_MODEL_DIR,
     TRAINING_STATE_DIR
 )
+from lerobot.utils.random_utils import set_seed
+from lerobot.rl.process import ProcessSignalHandler
+from lerobot.rl.wandb_utils import WandBLogger
 
 @parser.wrap()
 def train_cli(cfg: TrainRLServerPipelineConfig):
@@ -76,6 +81,79 @@ def train(cfg: TrainRLServerPipelineConfig, job_name: str | None = None):
     
     # Handle resume logic
     cfg = handle_resume_logic(cfg)
+
+    set_seed(seed=cfg.seed)
+
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cuda.matmul.allow_tf32 = True
+
+    is_threaded = use_threads(cfg)
+    shutdown_event = ProcessSignalHandler(is_threaded, display_pid=display_pid).shutdown_event
+
+    start_learner_threads(
+        cfg=cfg,
+        wandb_logger=wandb_logger,
+        shutdown_event=shutdown_event
+    )
+
+def start_learner_threads(
+        cfg: TrainRLServerPipelineConfig,
+        wandb_logger: WandBLogger | None,
+        shutdown_event: any, # Event
+) -> None:
+    """
+    Start the learner threads for training
+    """
+    # Create multiprocessing queues
+    transition_queue = Queue()
+    interaction_message_queue = Queue()
+    parameters_queue = Queue()
+
+    concurrency_entity = None
+
+    if use_threads(cfg):
+        from threading import Thread
+
+        concurrency_entity = Thread
+    else:
+        from torch.multiprocessing import Process
+
+        concurrency_entity = Process
+
+    communication_process = concurrency_entity(
+        target=start_learner,
+        args=(
+            args=(
+                parameters_queue,
+                transition_queue,
+                interaction_message_queue,
+                shutdown_event,
+                cfg,
+            ),
+            daemon=True
+        )
+    )
+    communication_process.start()
+
+    add_actor_information_and_train(
+    )
+    logging.info("[LEARNER] Training process stopped")
+
+    logging.info("[LEARNER] Closing queues")
+    transition_queue.close()
+    interaction_message_queue.close()
+    parameters_queue.close()
+
+    communication_process.join()
+    logging.info("[LEARNER] Communication process joined")
+    
+    logging.info("[LEARNER] join queues")
+    transition_queue.cancel_join_thread()
+    interaction_message_queue.cancel_join_thread()
+    parameters_queue.cancel_join_thread()
+
+    logging.info("[LEARNER] queues closed")
+
 
 
 def handle_resume_logic(cfg: TrainRLServerPipelineConfig) -> TrainRLServerPipelineConfig:
