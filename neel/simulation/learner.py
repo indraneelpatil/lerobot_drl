@@ -35,6 +35,8 @@ from lerobot.transport.utils import (
 )
 from lerobot.transport import services_pb2_grpc
 
+from .learner_service import MAX_WORKERS, SHUTDOWN_TIMEOUT, LearnerService
+
 @parser.wrap()
 def train_cli(cfg: TrainRLServerPipelineConfig):
     if not use_threads(cfg):
@@ -129,15 +131,13 @@ def start_learner_threads(
     communication_process = concurrency_entity(
         target=start_learner,
         args=(
-            args=(
-                parameters_queue,
-                transition_queue,
-                interaction_message_queue,
-                shutdown_event,
-                cfg,
+              parameters_queue,
+              transition_queue,
+              interaction_message_queue,
+              shutdown_event,
+              cfg,
             ),
             daemon=True
-        )
     )
     communication_process.start()
 
@@ -184,12 +184,19 @@ def start_learner(
         # But use shutdown event from the main process
         _ = ProcessSignalHandler(False, display_pid=True)
     
-    service = LearnerService()
+    service = LearnerService(
+        shutdown_event=shutdown_event,
+        parameters_queue=parameters_queue,
+        seconds_between_pushes=cfg.policy.actor_learner_config.policy_parameters_push_frequency,
+        transition_queue=transition_queue,
+        interaction_message_queue=interaction_message_queue,
+        queue_get_timeout=cfg.policy.actor_learner_config.queue_get_timeout,
+    )
 
     server = grpc.server(
         ThreadPoolExecutor(max_workers=MAX_WORKERS),
         options=[
-            ("grpc.max_receive_message_length", MAX_MESSAGE_LENGTH),
+            ("grpc.max_receive_message_length", MAX_MESSAGE_SIZE),
             ("grpc.max_send_message_length", MAX_MESSAGE_SIZE)
         ]
     )
@@ -209,6 +216,23 @@ def start_learner(
     shutdown_event.wait()
     logging.info("[LEARNER] Stopping gRPC server...")
     server.stop(SHUTDOWN_TIMEOUT)
+
+
+def add_actor_information_and_train(
+    cfg: TrainRLServerPipelineConfig,
+    wandb_logger: WandBLogger | None,
+    shutdown_event: any, # Event
+    transition_queue: Queue,
+    interaction_message_queue: Queue,
+    parameters_queue: Queue 
+):
+    """
+    Fill replay buffer from actor, sample batches from buffers and perform
+    critic updates, also updare actor and other optimizers, log training
+    statistics
+    """
+    pass
+
 
 def handle_resume_logic(cfg: TrainRLServerPipelineConfig) -> TrainRLServerPipelineConfig:
     """
