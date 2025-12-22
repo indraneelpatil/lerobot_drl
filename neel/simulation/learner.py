@@ -9,9 +9,11 @@ based on transitions received from the actor server
 import logging
 import os
 
+import grpc
 from termcolor import colored
 import torch
 from torch.multiprocessing import Queue
+from concurrent.futures import ThreadPoolExecutor
 
 from lerobot.configs.train import TrainRLServerPipelineConfig
 from lerobot.configs import parser
@@ -28,6 +30,10 @@ from lerobot.utils.constants import (
 from lerobot.utils.random_utils import set_seed
 from lerobot.rl.process import ProcessSignalHandler
 from lerobot.rl.wandb_utils import WandBLogger
+from lerobot.transport.utils import (
+    MAX_MESSAGE_SIZE
+)
+from lerobot.transport import services_pb2_grpc
 
 @parser.wrap()
 def train_cli(cfg: TrainRLServerPipelineConfig):
@@ -154,7 +160,55 @@ def start_learner_threads(
 
     logging.info("[LEARNER] queues closed")
 
+def start_learner(
+    parameters_queue: Queue,
+    transition_queue: Queue,
+    interaction_message_queue: Queue,
+    shutdown_event: any, # Event
+    cfg: TrainRLServerPipelineConfig,
+):
+    """
+    Start the learner server for training
+    """
+    if not use_threads(cfg):
+        # Create a process-specific log file
+        log_dir = os.path.join(cfg.output_dir, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, f"learner_process_{os.getpid()}.log")
 
+        # Initialize logging with explicit log file
+        init_logging(log_file=log_file, display_pid=True)
+        logging.info("Learner server process logging initialized")
+
+        # Setup process handlers to handle shutdown signal
+        # But use shutdown event from the main process
+        _ = ProcessSignalHandler(False, display_pid=True)
+    
+    service = LearnerService()
+
+    server = grpc.server(
+        ThreadPoolExecutor(max_workers=MAX_WORKERS),
+        options=[
+            ("grpc.max_receive_message_length", MAX_MESSAGE_LENGTH),
+            ("grpc.max_send_message_length", MAX_MESSAGE_SIZE)
+        ]
+    )
+
+    services_pb2_grpc.add_LearnerServiceServicer_to_server(
+        service,
+        server
+    )
+
+    host = cfg.policy.actor_learner_config.learner_host
+    port = cfg.policy.actor_learner_config.learner_port
+
+    server.add_insecure_port(f"{host}:{port}")
+    server.start()
+    logging.info("[LEARNER] gRPC server started")
+
+    shutdown_event.wait()
+    logging.info("[LEARNER] Stopping gRPC server...")
+    server.stop(SHUTDOWN_TIMEOUT)
 
 def handle_resume_logic(cfg: TrainRLServerPipelineConfig) -> TrainRLServerPipelineConfig:
     """
