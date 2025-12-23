@@ -8,10 +8,12 @@ based on transitions received from the actor server
 """
 import logging
 import os
+import time
 
 import grpc
 from termcolor import colored
 import torch
+from torch import nn
 from torch.multiprocessing import Queue
 from concurrent.futures import ThreadPoolExecutor
 
@@ -34,6 +36,11 @@ from lerobot.transport.utils import (
     MAX_MESSAGE_SIZE
 )
 from lerobot.transport import services_pb2_grpc
+from lerobot.utils.utils import (
+    get_safe_torch_device
+)
+from lerobot.policies.sac.modeling_sac import SACPolicy
+from lerobot.policies.factory import make_policy
 
 from .learner_service import MAX_WORKERS, SHUTDOWN_TIMEOUT, LearnerService
 
@@ -228,10 +235,69 @@ def add_actor_information_and_train(
 ):
     """
     Fill replay buffer from actor, sample batches from buffers and perform
-    critic updates, also updare actor and other optimizers, log training
+    critic updates, also update actor and other optimizers, log training
     statistics
     """
-    pass
+    # Extract all configuration variables at the beginning, it improves the 
+    # speed performance of 7%
+    device = get_safe_torch_device(try_device=cfg.policy.device, log=True)
+    storage_device = get_safe_torch_device(try_device=cfg.policy.storage_device)
+    clip_grad_norm_value = cfg.policy.grad_clip_norm
+    online_step_before_learning = cfg.policy.online_step_before_learning
+    utd_ratio = cfg.policy.utd_ratio
+    fps = cfg.env.fps
+    log_freq = cfg.log_freq
+    save_freq = cfg.save_freq
+    policy_update_freq = cfg.policy.policy_update_freq
+    policy_parameters_push_frequency = cfg.policy.actor_learner_config.policy_parameters_push_frequency
+    saving_checkpoint = cfg.save_checkpoint
+    online_steps = cfg.policy.online_steps
+    async_prefetch = cfg.policy.async_prefetch
+
+    # Initialize logging for multiprocessing
+    if not use_threads(cfg):
+        log_dir = os.path.join(cfg.output_dir, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, f"learner_train_process_{os.getpid()}.log")
+        init_logging(log_file=log_file, display_pid=True)
+        logging.info("Initialized logging for actor information and training process")
+
+    logging.info("Initializing policy")
+
+    policy: SACPolicy = make_policy(
+        cfg=cfg.policy,
+        env_cfg=cfg.env
+    )
+
+    assert isinstance(policy, nn.Module)
+
+    policy.train()
+
+    push_actor_policy_to_queue(parameters_queue=parameters_queue, policy=policy)
+
+    last_time_policy_pushed = time.time()
+
+    optimizers, lr_scheduler = make_optimizers_and_scheduler(cfg=cfg, policy=policy)
+
+    # If we are resuming, we need to load the training state
+    resume_optimization_step, resume_interaction_step = load_training_state(cfg=cfg, optimizers=optimizers)
+
+    log_training_info(cfg=cfg, policy=policy)
+
+    replay_buffer = initialize_replay_buffer(cfg, device, storage_device)
+    batch_size = cfg.batch_size
+    offline_replay_buffer = None
+
+    if cfg.dataset is not None:
+        offline_replay_buffer = initialize_offline_replay_buffer(
+            cfg=cfg,
+            device=device,
+            storage_device=storage_device
+        )
+        batch_size: int = batch_size // 2 # We will sample from both the replay buffer
+
+    logging.info("Starting learner thread")
+
 
 
 def handle_resume_logic(cfg: TrainRLServerPipelineConfig) -> TrainRLServerPipelineConfig:
