@@ -304,6 +304,121 @@ def add_actor_information_and_train(
         batch_size: int = batch_size // 2 # We will sample from both the replay buffer
 
     logging.info("Starting learner thread")
+    interaction_message = None
+    optimization_step = resume_optimization_step if resume_optimization_step is not None else 0
+    interaction_step_shift = resume_interaction_step if resume_interaction_step is not None else 0
+
+    dataset_repo_id = None
+    if cfg.dataset is not None:
+        dataset_repo_id = cfg.dataset.repo_id
+    
+    # Initialize iterators
+    online_iterator = None
+    offline_iterator = None
+
+    # NOTE: THIS IS THE MAIN LOOP OF THE LEARNER
+    while True:
+        # Exit the training loop if shutdown is requested
+        if shutdown_event is not None and shutdown_event.is_set():
+            logging.info("[LEARNER] Shutdown signal received. Exiting...")
+            break
+    
+        # Process all available transitions to the replay buffer, send by the actor server
+        process_transitions(
+            transition_queue=transition_queue,
+            replay_buffer=replay_buffer,
+            offline_replay_buffer=offline_replay_buffer,
+            device=device,
+            dataset_repo_id=dataset_repo_id,
+            shutdown_event=shutdown_event,
+        )
+
+        # Process all available interaction messages sent by the actor server
+        interaction_message = process_interaction_messages(
+            interaction_message_queue=interaction_message_queue,
+            interaction_step_shift=interaction_step_shift,
+            wandb_logger=wandb_logger,
+            shutdown_event=shutdown_event,
+        )
+
+        # Wait until the replay buffer has enough samples to start training
+        if len(replay_buffer) < online_step_before_learning:
+            continue
+
+        if online_iterator is None:
+            online_iterator = replay_buffer.get_iterator(
+                batch_size=batch_size, async_prefetch=async_prefetch, queue_size=2
+            )
+        
+        if offline_replay_buffer is not None and offline_iterator is None:
+            offline_iterator = offline_replay_buffer.get_iterator(
+                batch_size=batch_size, async_prefetch=async_prefetch, queue_size=2
+            )
+        
+        time_for_one_optimization_step = time.time()
+        for _ in range(utd_ratio - 1):
+            # Sample from the iterators
+            batch = next(online_iterator)
+
+            if dataset_repo_id is not None:
+                batch_offline = next(offline_iterator)
+                batch = concatenate_batch_transitions(
+                    left_batch_transitions=batch, right_batch_transition=batch_offline
+                )
+            
+            actions = batch[ACTION]
+            rewards = batch["reward"]
+            observations = batch["state"]
+            next_observations = batch["next_state"]
+            done = batch["done"]
+            check_nan_in_transition(observations=observations, actions=actions, next_state=next_observations)
+
+            observation_features, next_observation_features = get_observation_features(
+                policy=policy, observations=observations, next_observations=next_observations
+            )
+
+            # Create a batch dictionary with all required elements for the forward method
+            forward_batch = {
+                ACTION: actions,
+                "reward": rewards,
+                "state": observations,
+                "next_state": next_observations,
+                "done": done,
+                "observation_feature": observation_features,
+                "next_observation_feature": next_observation_features,
+                "complementary_info": batch["complementary_info"]
+            }
+
+            # Use the forward method for critic loss
+            critic_output = policy.forward(forward_batch, model="critic")
+
+            # Main critic optimization
+            loss_critic = critic_output["loss_critic"]
+            optimizers["critic"].zero_grad()
+            loss_critic.backward()
+            critic_grad_norm = torch.nn.utils.clip_grad_norm_(
+                parameters=policy.critic_ensemble.parameters(), max_norm=clip_grad_norm_value
+            )
+            optimizers["critic"].step()
+
+            # Discrete critic optimization (if available)
+            if policy.config.num_discrete_actions is not None:
+                discrete_critic_output = policy.forward(forward_batch, model="discrete_critic")
+                loss_discrete_critic = discrete_critic_output["loss_discrete_critic"]
+                optimizers["discrete_critic"].zero_grad()
+                loss_discrete_critic.backward()
+                discrete_critic_grad_norm = torch.nn.utils.clip_grad_norm_(
+                    parameters=policy.discrete_critic.parameters(), max_norm=clip_grad_norm_value
+                )
+                optimizers["discrete_critic"].step()
+
+            # Update target networks (main and discrete)
+            policy.update_target_networks()
+
+
+
+
+
 
 def push_actor_policy_to_queue(parameters_queue: Queue, policy: nn.Module):
     logging.debug("[LEARNER] Pushing actor policy to the queue")
