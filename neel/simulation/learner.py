@@ -16,11 +16,15 @@ import torch
 from torch import nn
 from torch.multiprocessing import Queue
 from concurrent.futures import ThreadPoolExecutor
+from torch.optim.optimizer import Optimizer
 
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.factory import make_dataset
 from lerobot.configs.train import TrainRLServerPipelineConfig
 from lerobot.configs import parser
 from lerobot.utils.utils import (
-    init_logging
+    init_logging,
+    format_big_number
 )
 from lerobot.utils.constants import (
     ACTION,
@@ -31,6 +35,7 @@ from lerobot.utils.constants import (
 )
 from lerobot.utils.random_utils import set_seed
 from lerobot.utils.transition import move_state_dict_to_device
+from lerobot.rl.buffer import ReplayBuffer
 from lerobot.rl.process import ProcessSignalHandler
 from lerobot.rl.wandb_utils import WandBLogger
 from lerobot.transport.utils import (
@@ -346,6 +351,84 @@ def make_optimizers_and_scheduler(cfg: TrainRLServerPipelineConfig, policy: nn.M
     if cfg.policy.num_discrete_actions is not None:
         optimizers["discrete_critic"] = optimizer_discrete_critic
     return optimizers, lr_scheduler
+
+def load_training_state(
+        cfg: TrainRLServerPipelineConfig,
+        optimizers: Optimizer | dict[str, Optimizer]
+):
+    """
+    Load the training state (optimizer, step count) from a checkpoint
+    """
+    if not cfg.resume:
+        return None, None
+    
+    raise RuntimeError("Resume Not implemented")
+    
+
+def log_training_info(cfg: TrainRLServerPipelineConfig, policy: nn.Module)-> None:
+    """
+    Log information about the training process
+    """
+    num_learnable_params = sum(p.numel() for p in policy.parameters() if p.requires_grad)
+    num_total_params = sum(p.numel() for p in policy.parameters())
+
+    logging.info(colored("Output dir:", "yellow", attrs=["bold"]) + f" {cfg.output_dir}")
+    logging.info(f"{cfg.env.task=}")
+    logging.info(f"{cfg.policy.online_steps=}")
+    logging.info(f"{num_learnable_params=} ({format_big_number(num_learnable_params)})")
+    logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
+
+
+def initialize_replay_buffer(
+        cfg: TrainRLServerPipelineConfig,
+        device: str,
+        storage_device: str,
+) -> ReplayBuffer:
+    """
+    Initialize a replay buffer, either empty or from a dataset if resuming.
+    """
+    if not cfg.resume:
+        return ReplayBuffer(
+            capacity=cfg.policy.online_buffer_capacity,
+            device=device,
+            state_keys=cfg.policy.input_features.keys(),
+            storage_device=storage_device,
+            optimize_memory=True
+
+        )
+    
+    raise RuntimeError("Resuming not implemented")
+
+
+def initialize_offline_replay_buffer(
+    cfg: TrainRLServerPipelineConfig,
+    device: str,
+    storage_device:str,
+) -> ReplayBuffer:
+    """
+    Initialize offline replay buffer from a dataset
+    """
+    if not cfg.resume:
+        logging.info("make dataset offline buffer")
+        offline_dataset = make_dataset(cfg)
+    else:
+        logging.info("load offline dataset")
+        dataset_offline_path = os.path.join(cfg.output_dir, "dataset_offline")
+        offline_dataset = LeRobotDataset(
+            repo_id = cfg.dataset.repo_id,
+            root=dataset_offline_path
+        )
+    
+    logging.info("Convert to a offline replay buffer")
+    offline_replay_buffer = ReplayBuffer.from_lerobot_dataset(
+        offline_dataset,
+        device=device,
+        state_keys=cfg.policy.input_features.keys(),
+        storage_device=storage_device,
+        optimize_memory=True,
+        capacity=cfg.policy.offline_buffer_capacity,
+    )
+    return offline_replay_buffer
 
 
 def handle_resume_logic(cfg: TrainRLServerPipelineConfig) -> TrainRLServerPipelineConfig:
