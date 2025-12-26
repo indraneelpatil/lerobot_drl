@@ -41,7 +41,8 @@ from lerobot.rl.wandb_utils import WandBLogger
 from lerobot.transport.utils import (
     MAX_MESSAGE_SIZE,
     state_to_bytes,
-    bytes_to_transitions
+    bytes_to_transitions,
+    bytes_to_python_object
 )
 from lerobot.transport import services_pb2_grpc
 from lerobot.utils.utils import (
@@ -583,6 +584,77 @@ def process_transitions(
             ):
                 offline_replay_buffer.add(**transition)
 
+def check_nan_in_transition(
+    observations: torch.Tensor,
+    actions: torch.Tensor,
+    next_state: torch.Tensor,
+    raise_error: bool = False,
+) -> bool:
+    """
+    Check for NaN values in transition data
+    """
+    nan_detected = False
+
+    # Check observations
+    for key, tensor in observations.items():
+        if torch.isnan(tensor).any():
+            logging.error(f"observations[{key}] contains NaN values")
+            nan_detected = True
+            if raise_error:
+                raise ValueError(f"NaN detected in observations[{key}]")
+            
+    # Check next state
+    for key, tensor in next_state.items():
+        if torch.isnan(tensor).any():
+            logging.error(f"next_state[{key}] contains NaN values")
+            nan_detected = True
+            if raise_error:
+                raise ValueError(f"NaN detected in next_state[{key}]")
+            
+    # Check actions
+    if torch.isnan(actions).any():
+        logging.error("actions contains NaN values")
+        nan_detected = True
+        if raise_error:
+            raise ValueError("NaN detected in actions")
+        
+    return nan_detected
+
+def process_interaction_messages(
+    interaction_message_queue: Queue,
+    interaction_step_shift: int,
+    wandb_logger: WandBLogger | None,
+    shutdown_event: any,
+) -> dict | None:
+    """
+    Process all interaction messages from the queue
+    """
+    last_message = None
+    while not interaction_message_queue.empty() and not shutdown_event.is_set():
+        message = interaction_message_queue.get()
+        last_message = process_interaction_message(
+            message=message,
+            interaction_step_shift=interaction_step_shift,
+            wandb_logger=wandb_logger,
+        )
+    
+    return last_message
+
+def process_interaction_message(
+    message, interaction_step_shift: int, wandb_logger: WandBLogger | None = None
+):
+    """
+    Process a single interaction message with consistent handling
+    """
+    message = bytes_to_python_object(message)
+    # Shift interaction step for consistency with checkpointed state
+    message["Interaction step"] += interaction_step_shift
+
+    # Log if logger available
+    if wandb_logger:
+        wandb_logger.log_dict(d=message, mode="train", custom_step_key="Interaction step")
+    
+    return message
 
 def handle_resume_logic(cfg: TrainRLServerPipelineConfig) -> TrainRLServerPipelineConfig:
     """
