@@ -34,13 +34,14 @@ from lerobot.utils.constants import (
     TRAINING_STATE_DIR
 )
 from lerobot.utils.random_utils import set_seed
-from lerobot.utils.transition import move_state_dict_to_device
+from lerobot.utils.transition import move_state_dict_to_device, move_transition_to_device
 from lerobot.rl.buffer import ReplayBuffer
 from lerobot.rl.process import ProcessSignalHandler
 from lerobot.rl.wandb_utils import WandBLogger
 from lerobot.transport.utils import (
     MAX_MESSAGE_SIZE,
-    state_to_bytes
+    state_to_bytes,
+    bytes_to_transitions
 )
 from lerobot.transport import services_pb2_grpc
 from lerobot.utils.utils import (
@@ -48,6 +49,7 @@ from lerobot.utils.utils import (
 )
 from lerobot.policies.sac.modeling_sac import SACPolicy
 from lerobot.policies.factory import make_policy
+from lerobot.teleoperators.utils import TeleopEvents
 
 from .learner_service import MAX_WORKERS, SHUTDOWN_TIMEOUT, LearnerService
 
@@ -544,6 +546,42 @@ def initialize_offline_replay_buffer(
         capacity=cfg.policy.offline_buffer_capacity,
     )
     return offline_replay_buffer
+
+
+def process_transitions(
+    transition_queue: Queue,
+    replay_buffer: ReplayBuffer,
+    offline_replay_buffer: ReplayBuffer,
+    device: str,
+    dataset_repo_id: str | None,
+    shutdown_event: any,
+):
+    """
+    Process all available transitions from the queue
+    """
+    while not transition_queue.empty() and not shutdown_event.is_set():
+        transition_list = transition_queue.get()
+        transition_list = bytes_to_transitions(buffer=transition_list)
+
+        for transition in transition_list:
+            transition = move_transition_to_device(transition=transition,device=device)
+
+            # Skip transitions with NaN values
+            if check_nan_in_transition(
+                observations=transition["state"],
+                actions=transition[ACTION],
+                next_state=transition["next_state"]
+            ):
+                logging.warning("[LEARNER] NaN detected in transition, skipping")
+                continue
+
+            replay_buffer.add(**transition)
+
+            # Add to offline buffer if its an intervention
+            if dataset_repo_id is not None and transition.get("complementary_info", {}).get(
+                TeleopEvents.IS_INTERVENTION
+            ):
+                offline_replay_buffer.add(**transition)
 
 
 def handle_resume_logic(cfg: TrainRLServerPipelineConfig) -> TrainRLServerPipelineConfig:
