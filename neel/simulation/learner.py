@@ -9,6 +9,7 @@ based on transitions received from the actor server
 import logging
 import os
 import time
+import shutil
 
 import grpc
 from termcolor import colored
@@ -33,9 +34,14 @@ from lerobot.utils.constants import (
     PRETRAINED_MODEL_DIR,
     TRAINING_STATE_DIR
 )
+from lerobot.utils.train_utils import (
+    get_step_checkpoint_dir,
+    save_checkpoint,
+    update_last_checkpoint
+)
 from lerobot.utils.random_utils import set_seed
 from lerobot.utils.transition import move_state_dict_to_device, move_transition_to_device
-from lerobot.rl.buffer import ReplayBuffer
+from lerobot.rl.buffer import ReplayBuffer, concatenate_batch_transitions
 from lerobot.rl.process import ProcessSignalHandler
 from lerobot.rl.wandb_utils import WandBLogger
 from lerobot.transport.utils import (
@@ -417,9 +423,158 @@ def add_actor_information_and_train(
 
             # Update target networks (main and discrete)
             policy.update_target_networks()
+        
+        # Sample for the last update in the UTD ratio
+        batch = next(online_iterator)
 
+        if dataset_repo_id is not None:
+            batch_offline = next(offline_iterator)
+            batch = concatenate_batch_transitions(
+                left_batch_transitions=batch, right_batch_transition=batch_offline
+            )
 
+        actions = batch[ACTION]
+        rewards = batch["reward"]
+        observations = batch["state"]
+        next_observations = batch["next_state"]
+        done = batch["done"]
 
+        check_nan_in_transition(observations=observations, actions=actions, next_state=next_observations)
+
+        observation_features, next_observation_features = get_observation_features(
+            policy=policy, observations=observations, next_observations=next_observations
+        )
+
+        # Create a batch dictionary with all the required elements for the forward method
+        forward_batch = {
+            ACTION: actions,
+            "reward": rewards,
+            "state": observations,
+            "next_state": next_observations,
+            "done": done,
+            "observation_feature": observation_features,
+            "next_observation_feature": next_observation_features
+        }
+
+        critic_output = policy.forward(forward_batch, model="critic")
+
+        loss_critic = critic_output["loss_critic"]
+        optimizers["critic"].zero_grad()
+        loss_critic.backward()
+        critic_grad_norm = torch.nn.utils.clip_grad_norm_(
+            parameters=policy.critic_ensemble.parameters(), max_norm=clip_grad_norm_value
+        ).item()
+        optimizers["critic"].step()
+
+        # Initialize training info dictionary
+        training_infos = {
+            "loss_critic": loss_critic.item(),
+            "critic_grad_norm": critic_grad_norm,
+        }
+
+        # Discrete critic optimization (if available)
+        if policy.config.num_discrete_actions is not None:
+            discrete_critic_output = policy.forward(forward_batch, model="discrete_critic")
+            loss_discrete_critic = discrete_critic_output["loss_discrete_critic"]
+            optimizers["discrete_critic"].zero_grad()
+            loss_discrete_critic.backward()
+            discrete_critic_grad_norm = torch.nn.utils.clip_grad_norm_(
+                parameters=policy.discrete_critic.parameters(), max_norm=clip_grad_norm_value
+            ).item()
+            optimizers["discrete_critic"].step()
+
+            # Add discrete critic info to training info
+            training_infos["loss_discrete_critic"] = loss_discrete_critic.item()
+            training_infos["discrete_critic_grad_norm"] = discrete_critic_grad_norm
+
+        # Actor and temperature optimization (at specified frequency)
+        if optimization_step % policy_update_freq == 0:
+            for _ in range(policy_update_freq):
+                # Actor optimization
+                actor_output = policy.forward(forward_batch, model="actor")
+                loss_actor = actor_output["loss_actor"]
+                optimizers["actor"].zero_grad()
+                loss_actor.backward()
+                actor_grad_norm = torch.nn.utils.clip_grad_norm_(
+                    parameters=policy.actor.parameters(), max_norm=clip_grad_norm_value
+                ).item()
+                optimizers["actor"].step()
+
+                # Add actor info to training info
+                training_infos["loss_actor"] = loss_actor.item()
+                training_infos["actor_grad_norm"] = actor_grad_norm
+
+                # Temperature optimization
+                temperature_output = policy.forward(forward_batch, model="temperature")
+                loss_temperature = temperature_output["loss_temperature"]
+                optimizers["temperature"].zero_grad()
+                loss_temperature.backward()
+                temp_grad_norm = torch.nn.utils.clip_grad_norm_(
+                    parameters=[policy.log_alpha], max_norm=clip_grad_norm_value
+                ).item()
+                optimizers["temperature"].step()
+
+                # Add temperature info to training info
+                training_infos["loss_temperature"] = loss_temperature.item()
+                training_infos["temeperature_grad_norm"] = temp_grad_norm
+                training_infos["temperature"] = policy.temperature
+
+                # Update temperature
+                policy.update_temperature()
+
+        # Push policy to actors if needed
+        if time.time() - last_time_policy_pushed > policy_parameters_push_frequency:
+            push_actor_policy_to_queue(parameters_queue=parameters_queue, policy=policy)
+            last_time_policy_pushed = time.time()
+
+        # Update target networks (main and discrete)
+        policy.update_target_networks()
+
+        # Log training metrics at specified intervals
+        if optimization_step % log_freq == 0:
+            training_infos["replay_buffer_size"] = len(replay_buffer)
+            if offline_replay_buffer is not None:
+                training_infos["offline_replay_buffer_size"] = len(offline_replay_buffer)
+            training_infos["Optimization step"] = optimization_step
+
+            # Log training metrics
+            if wandb_logger:
+                wandb_logger.log_dict(d=training_infos, mode="train", custom_step_key="Optimization step")
+
+        # Calculate and log optimization frequency
+        time_for_one_optimization_step = time.time() - time_for_one_optimization_step
+        frequency_for_one_optimization_step = 1 / (time_for_one_optimization_step + 1e-9)
+
+        logging.info(f"[LEARNER] Optimization frequency loop [Hz]: {frequency_for_one_optimization_step}")
+
+        # Log optimization frequency
+        if wandb_logger:
+            wandb_logger.log_dict(
+                {
+                    "Optimization frequency loop [Hz]": frequency_for_one_optimization_step,
+                    "Optimization step": optimization_step,
+                },
+                mode="train",
+                custom_step_key="Optimization step"
+            )
+        optimization_step += 1
+        if optimization_step % log_freq == 0:
+            logging.info(f"[LEARNER] Number of optimization step: {optimization_step}")
+
+        # Save checkpoint at specified intervals
+        if saving_checkpoint and (optimization_step % save_freq == 0 or optimization_step == online_steps):
+            save_training_checkpoint(
+                cfg=cfg,
+                optimization_step=optimization_step,
+                online_steps=online_steps,
+                interaction_message=interaction_message,
+                policy=policy,
+                optimizers=optimizers,
+                replay_buffer=replay_buffer,
+                offline_replay_buffer=offline_replay_buffer,
+                dataset_repo_id=dataset_repo_id,
+                fps=fps,
+            )
 
 
 
@@ -655,6 +810,87 @@ def process_interaction_message(
         wandb_logger.log_dict(d=message, mode="train", custom_step_key="Interaction step")
     
     return message
+
+def get_observation_features(
+        policy: SACPolicy, observations: torch.Tensor, next_observations: torch.Tensor
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    """
+    Get observation features from the policy encoder.
+    """
+    if policy.config.vision_encoder_name is None or not policy.config.freeze_vision_encoder:
+        return None, None
+    
+    with torch.no_grad():
+        observation_features = policy.actor.encoder.get_cached_image_features(observations)
+        next_observation_features = policy.actor.encoder.get_cached_image_features(next_observations)
+
+    return observation_features, next_observation_features
+
+def save_training_checkpoint(
+    cfg: TrainRLServerPipelineConfig,
+    optimization_step: int,
+    online_steps: int,
+    interaction_message: dict | None,
+    policy: nn.Module,
+    optimizers: dict[str, Optimizer],
+    replay_buffer: ReplayBuffer,
+    offline_replay_buffer: ReplayBuffer | None = None,
+    dataset_repo_id: str | None = None,
+    fps: int = 30,
+) -> None:
+    """
+    Save training checkpoint and associate data
+    """
+    logging.info(f"Checkpoint policy after step {optimization_step}")
+    _num_digits = max(6, len(str(online_steps)))
+    interaction_step = interaction_message["Interaction step"] if interaction_message is not None else 0
+
+    # Create checkpoint directory
+    checkpoint_dir = get_step_checkpoint_dir(cfg.output_dir, online_steps, optimization_step)
+
+    # Save checkpoint
+    save_checkpoint(
+        checkpoint_dir=checkpoint_dir,
+        step=optimization_step,
+        cfg=cfg,
+        policy=policy,
+        optimizer=optimizers,
+        scheduler=None
+    )
+
+    # Save interaction step manually
+    training_state_dir = os.path.join(checkpoint_dir, TRAINING_STATE_DIR)
+    os.makedirs(training_state_dir, exist_ok=True)
+    training_state = {"step": optimization_step, "interaction_step": interaction_step}
+    torch.save(training_state, os.path.join(training_state_dir, "training_state.pt"))
+
+    # Update the "last" symlink
+    update_last_checkpoint(checkpoint_dir)
+
+    # TODO : temporary save replay buffer here, remove later when on the robot
+    # We want to control this with the keyboard inputs
+    dataset_dir = os.path.join(cfg.output_dir, "dataset")
+    if os.path.exists(dataset_dir) and os.path.isdir(dataset_dir):
+        shutil.rmtree(dataset_dir)
+
+    # Save dataset
+    # NOTE: Handle the case where the dataset repo id is not specified in the config
+    # e.g. RL training without demonstrations data
+    repo_id_buffer_save = cfg.env.task if dataset_repo_id is None else dataset_repo_id
+    replay_buffer.to_lerobot_dataset(repo_id=repo_id_buffer_save, fps=fps, root=dataset_dir)
+
+    if offline_replay_buffer is not None:
+        dataset_offline_dir = os.path.join(cfg.output_dir, "dataset_offline")
+        if os.path.exists(dataset_offline_dir) and os.path.isdir(dataset_offline_dir):
+            shutil.rmtree(dataset_offline_dir)
+
+        offline_replay_buffer.to_lerobot_dataset(
+            cfg.dataset.repo_id,
+            fps=fps,
+            root=dataset_offline_dir
+        )
+
+    logging.info("Resume training")
 
 def handle_resume_logic(cfg: TrainRLServerPipelineConfig) -> TrainRLServerPipelineConfig:
     """
