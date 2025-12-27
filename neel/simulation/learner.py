@@ -165,6 +165,12 @@ def start_learner_threads(
     communication_process.start()
 
     add_actor_information_and_train(
+        cfg=cfg,
+        wandb_logger=wandb_logger,
+        shutdown_event=shutdown_event,
+        transition_queue=transition_queue,
+        interaction_message_queue=interaction_message_queue,
+        parameters_queue=parameters_queue
     )
     logging.info("[LEARNER] Training process stopped")
 
@@ -365,6 +371,8 @@ def add_actor_information_and_train(
             )
         
         time_for_one_optimization_step = time.time()
+        # UTD ratio: Update to data ratio
+        # Reuse the same data multiple times
         for _ in range(utd_ratio - 1):
             # Sample from the iterators
             batch = next(online_iterator)
