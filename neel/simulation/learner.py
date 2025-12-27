@@ -5,6 +5,8 @@ Created by Indraneel on 12/21/2025
 Learner process which initialises the policy and replay buffer and updates policy
 based on transitions received from the actor server
 
+python -m simulation.learner --config_path simulation/config/gym_hil_env_train.json
+
 """
 import logging
 import os
