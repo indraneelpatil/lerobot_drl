@@ -3,6 +3,25 @@
 Created by Indraneel on 12/29/2025
 """
 
+
+"""Launch Isaac Sim Simulator first."""
+import multiprocessing
+if multiprocessing.get_start_method() != "spawn":
+    multiprocessing.set_start_method("spawn", force=True)
+
+from isaaclab.app import AppLauncher
+
+# launch omniverse app
+app_launcher = AppLauncher()
+simulation_app = app_launcher.app
+
+
+"""Rest everything else follows."""
+
+from isaaclab.envs import ManagerBasedRLEnv
+from isaaclab_tasks.utils import parse_env_cfg
+from isaaclab.managers import TerminationTermCfg, DatasetExportMode
+
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -78,6 +97,10 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig) -> tuple[gym.Env, Any]:
         )
 
         return env, None
+    
+    if cfg.name == "gym_isaac_sim_hil":
+        pass
+
 
     # TODO Real robot environment
     raise NotImplementedError("Real robot environment not implemented yet")
@@ -86,7 +109,10 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig) -> tuple[gym.Env, Any]:
 @parser.wrap()
 def main(cfg: GymManipulatorConfig) -> None:
     """ Main entry """
-    env, teleop_device = make_robot_env(cfg.env)
+    # env, teleop_device = make_robot_env(cfg.env)
+
+    # Close the simulator
+    simulation_app.close()
 
 
 if __name__ == "__main__":
