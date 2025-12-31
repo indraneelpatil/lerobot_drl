@@ -39,8 +39,11 @@ import gymnasium as gym
 from lerobot.configs import parser
 from lerobot.envs.configs import HILSerlRobotEnvConfig
 from lerobot.teleoperators.teleoperator import Teleoperator
+from lerobot.model.kinematics import RobotKinematics
 from lerobot.processor import (
     AddBatchDimensionProcessorStep,
+    AddTeleopActionAsComplimentaryDataStep,
+    AddTeleopEventsAsInfoStep,
     DataProcessorPipeline,
     DeviceProcessorStep,
     EnvTransition,
@@ -54,7 +57,10 @@ from lerobot.processor import (
 from lerobot.processor.converters import identity_transition
 from lerobot.utils.robot_utils import busy_wait
 from lerobot.teleoperators import (
-    keyboard
+    gamepad,  # noqa: F401
+    keyboard,  # noqa: F401
+    make_teleoperator_from_config,
+    so101_leader,  # noqa: F401
 )
 from lerobot.utils.constants import ACTION, DONE, OBS_IMAGES, OBS_STATE, REWARD
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
@@ -121,7 +127,11 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig, device: str) -> tuple[gym.Env, An
         # Create environment
         env: ManagerBasedRLEnv = gym.make(cfg.task, cfg=env_cfg)
 
-        return env, None
+        assert cfg.teleop is not None, "Teleop config must be provided for gym isaac environment"
+        teleop_device = make_teleoperator_from_config(cfg.teleop)
+        # teleop_device.connect()
+
+        return env, teleop_device
 
     # TODO Real robot environment
     raise NotImplementedError("Real robot environment not implemented yet")
@@ -322,7 +332,19 @@ def control_loop(env: gym.Env,
         busy_wait(dt - (time.perf_counter() - step_start_time))
 
     # TODO Push to hub
-        
+
+def get_joint_names_from_urdf(urdf_path: str) -> list[str]:
+    try:
+        import placo
+    except ImportError as e:
+        raise ImportError(
+            "placo is required for RobotKinematics. "
+            "Please install the optional dependencies of `kinematics` in the package."
+        ) from e
+    robot = placo.RobotWrapper(urdf_path)
+
+    return list(robot.joint_names())
+
 
 def make_processors(
         env: gym.Env, teleop_device: Teleoperator | None, cfg: HILSerlRobotEnvConfig, device: str ="cpu"
@@ -332,10 +354,54 @@ def make_processors(
         cfg.processor.reset.terminate_on_success if cfg.processor.reset is not None else True
     )
 
+    joint_names = get_joint_names_from_urdf(cfg.processor.inverse_kinematics.urdf_path)
+    print(f"Joint names are {joint_names}")
+
+    # Set up kinematics solver if inverse kinematics is configured
+    kinematics_solver = None
+    if cfg.processor.inverse_kinematics is not None:
+        kinematics_solver = RobotKinematics(
+            urdf_path=cfg.processor.inverse_kinematics.urdf_path,
+            target_frame_name=cfg.processor.inverse_kinematics.target_frame_name,
+            joint_names=joint_names,
+        )
+
     if cfg.name == "gym_isaac_sim_hil":
         action_pipeline_steps = [
-            InterventionActionProcessorStep(terminate_on_success=terminate_on_success),
+            AddTeleopActionAsComplimentaryDataStep(teleop_device=teleop_device),
+            InterventionActionProcessorStep(
+                use_gripper=cfg.processor.gripper.use_gripper if cfg.processor.gripper is not None else False,
+                terminate_on_success=terminate_on_success),
         ]
+
+    # # Replace InverseKinematicsProcessor with new kinematic processors
+    # if cfg.processor.inverse_kinematics is not None and kinematics_solver is not None:
+    #     # Add EE bounds and safety processor
+    #     inverse_kinematics_steps = [
+    #         MapTensorToDeltaActionDictStep(
+    #             use_gripper=cfg.processor.gripper.use_gripper if cfg.processor.gripper is not None else False
+    #         ),
+    #         MapDeltaActionToRobotActionStep(),
+    #         EEReferenceAndDelta(
+    #             kinematics=kinematics_solver,
+    #             end_effector_step_sizes=cfg.processor.inverse_kinematics.end_effector_step_sizes,
+    #             motor_names=motor_names,
+    #             use_latched_reference=False,
+    #             use_ik_solution=True,
+    #         ),
+    #         EEBoundsAndSafety(
+    #             end_effector_bounds=cfg.processor.inverse_kinematics.end_effector_bounds,
+    #         ),
+    #         GripperVelocityToJoint(
+    #             clip_max=cfg.processor.max_gripper_pos,
+    #             speed_factor=1.0,
+    #             discrete_gripper=True,
+    #         ),
+    #         InverseKinematicsRLStep(
+    #             kinematics=kinematics_solver, motor_names=motor_names, initial_guess_current_joints=False
+    #         ),
+    #     ]
+    #     action_pipeline_steps.extend(inverse_kinematics_steps)
 
         env_pipeline_steps = [
             Numpy2TorchActionProcessorStep(),

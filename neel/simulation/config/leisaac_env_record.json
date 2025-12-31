@@ -4,7 +4,11 @@
         "task": "LeIsaac-SO101-LiftCube-v0",
         "fps": 10,
         "robot": null,
-        "teleop": null,
+        "teleop": {
+            "type": "so101_leader",
+            "id": "singles_inferno_dex_leader",
+            "port": "/dev/ttyACM0"
+        },
         "processor": {
             "control_mode": "keyboard",
             "gripper": {
@@ -18,6 +22,20 @@
                 "terminate_on_success": true
             },
             "inverse_kinematics": {
+                "urdf_path": "/home/neel/Projects/lerobot_drl/assets/robots/so101.urdf",
+                "target_frame_name": "gripperframe",
+                "end_effector_bounds": {
+                    "min": [
+                        0.195,
+                        -0.065,
+                        0.005
+                    ],
+                    "max": [
+                        0.25,
+                        0.065,
+                        0.1
+                    ]
+                },
                 "end_effector_step_sizes": {
                 "x": 0.025,
                 "y": 0.025,
