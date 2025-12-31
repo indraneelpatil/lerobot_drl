@@ -127,13 +127,36 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig, device: str) -> tuple[gym.Env, An
     raise NotImplementedError("Real robot environment not implemented yet")
 
 
+def control_loop(env: gym.Env, cfg: GymManipulatorConfig):
+    """ Main control loop for environment interaction"""
+    dt = 1.0 / cfg.env.fps
+
+    print(f"Starting control loop at {cfg.env.fps} FPS")
+
+    # Reset environment
+    obs, info = env.reset()
+
+    # simulate environment
+    while simulation_app.is_running():
+        step_start_time = time.perf_counter()
+        actions = None
+
+        if actions is None:
+            env.render()
+        else:
+            env.step(actions)
+
+        # Maintain fps timing
+        busy_wait(dt - (time.perf_counter() - step_start_time))
+        
+
+
 @parser.wrap()
 def main(cfg: GymManipulatorConfig) -> None:
     """ Main entry """
     env, teleop_device = make_robot_env(cfg.env, cfg.device)
 
-    while True:
-        time.sleep(1)
+    control_loop(env,cfg)
 
     # Close the simulator
     simulation_app.close()
