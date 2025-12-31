@@ -11,8 +11,13 @@ if multiprocessing.get_start_method() != "spawn":
 
 from isaaclab.app import AppLauncher
 
+# isaac sim args
+app_launcher_args = {
+    "enable_cameras" : True
+}
+
 # launch omniverse app
-app_launcher = AppLauncher()
+app_launcher = AppLauncher(app_launcher_args)
 simulation_app = app_launcher.app
 
 
@@ -29,6 +34,7 @@ import time
 import torch
 import numpy as np
 
+import leisaac
 import gymnasium as gym
 from lerobot.configs import parser
 from lerobot.envs.configs import HILSerlRobotEnvConfig
@@ -75,7 +81,7 @@ class GymManipulatorConfig:
     mode: str | None = None
     device: str = "cpu"
 
-def make_robot_env(cfg: HILSerlRobotEnvConfig) -> tuple[gym.Env, Any]:
+def make_robot_env(cfg: HILSerlRobotEnvConfig, device: str) -> tuple[gym.Env, Any]:
     """Create robot environment
     
     """
@@ -98,9 +104,24 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig) -> tuple[gym.Env, Any]:
 
         return env, None
     
-    if cfg.name == "gym_isaac_sim_hil":
-        pass
+    if cfg.name == "gym_isaac_sim_hil" and cfg.task !=None :
+        env_cfg = parse_env_cfg(cfg.task, device, num_envs=1)
+        env_cfg.use_teleop_device(cfg.processor.control_mode)
+        env_cfg.seed = int(time.time())
 
+        # Modify configuration
+        if hasattr(env_cfg.terminations, "time_out"):
+            env_cfg.terminations.time_out = None
+        if hasattr(env_cfg.terminations, "success"):
+            env_cfg.terminations.success = None
+        
+        # TODO recording
+        env_cfg.recorders = None
+        
+        # Create environment
+        env: ManagerBasedRLEnv = gym.make(cfg.task, cfg=env_cfg)
+
+        return env, None
 
     # TODO Real robot environment
     raise NotImplementedError("Real robot environment not implemented yet")
@@ -109,7 +130,10 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig) -> tuple[gym.Env, Any]:
 @parser.wrap()
 def main(cfg: GymManipulatorConfig) -> None:
     """ Main entry """
-    # env, teleop_device = make_robot_env(cfg.env)
+    env, teleop_device = make_robot_env(cfg.env, cfg.device)
+
+    while True:
+        time.sleep(1)
 
     # Close the simulator
     simulation_app.close()
