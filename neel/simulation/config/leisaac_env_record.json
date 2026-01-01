@@ -7,7 +7,7 @@
         "teleop": {
             "type": "so101_leader",
             "id": "singles_inferno_dex_leader",
-            "port": "/dev/ttyACM0"
+            "port": "/dev/ttyACM1"
         },
         "processor": {
             "control_mode": "keyboard",

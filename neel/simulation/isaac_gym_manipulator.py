@@ -52,7 +52,17 @@ from lerobot.processor import (
     Numpy2TorchActionProcessorStep,
     VanillaObservationProcessorStep,
     create_transition,
-    TransitionKey
+    TransitionKey,
+    MapTensorToDeltaActionDictStep,
+    MapDeltaActionToRobotActionStep,
+    RobotActionToPolicyActionProcessorStep
+)
+from lerobot.robots.so100_follower.robot_kinematic_processor import (
+    EEBoundsAndSafety,
+    EEReferenceAndDelta,
+    ForwardKinematicsJointsToEEObservation,
+    GripperVelocityToJoint,
+    InverseKinematicsRLStep,
 )
 from lerobot.processor.converters import identity_transition
 from lerobot.utils.robot_utils import busy_wait
@@ -129,7 +139,7 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig, device: str) -> tuple[gym.Env, An
 
         assert cfg.teleop is not None, "Teleop config must be provided for gym isaac environment"
         teleop_device = make_teleoperator_from_config(cfg.teleop)
-        # teleop_device.connect()
+        teleop_device.connect()
 
         return env, teleop_device
 
@@ -374,45 +384,46 @@ def make_processors(
                 terminate_on_success=terminate_on_success),
         ]
 
-    # # Replace InverseKinematicsProcessor with new kinematic processors
-    # if cfg.processor.inverse_kinematics is not None and kinematics_solver is not None:
-    #     # Add EE bounds and safety processor
-    #     inverse_kinematics_steps = [
-    #         MapTensorToDeltaActionDictStep(
-    #             use_gripper=cfg.processor.gripper.use_gripper if cfg.processor.gripper is not None else False
-    #         ),
-    #         MapDeltaActionToRobotActionStep(),
-    #         EEReferenceAndDelta(
-    #             kinematics=kinematics_solver,
-    #             end_effector_step_sizes=cfg.processor.inverse_kinematics.end_effector_step_sizes,
-    #             motor_names=motor_names,
-    #             use_latched_reference=False,
-    #             use_ik_solution=True,
-    #         ),
-    #         EEBoundsAndSafety(
-    #             end_effector_bounds=cfg.processor.inverse_kinematics.end_effector_bounds,
-    #         ),
-    #         GripperVelocityToJoint(
-    #             clip_max=cfg.processor.max_gripper_pos,
-    #             speed_factor=1.0,
-    #             discrete_gripper=True,
-    #         ),
-    #         InverseKinematicsRLStep(
-    #             kinematics=kinematics_solver, motor_names=motor_names, initial_guess_current_joints=False
-    #         ),
-    #     ]
-    #     action_pipeline_steps.extend(inverse_kinematics_steps)
+        # Replace InverseKinematicsProcessor with new kinematic processors
+        if cfg.processor.inverse_kinematics is not None and kinematics_solver is not None:
+            # Add EE bounds and safety processor
+            inverse_kinematics_steps = [
+                MapTensorToDeltaActionDictStep(
+                    use_gripper=cfg.processor.gripper.use_gripper if cfg.processor.gripper is not None else False
+                ),
+                MapDeltaActionToRobotActionStep(),
+                EEReferenceAndDelta(
+                    kinematics=kinematics_solver,
+                    end_effector_step_sizes=cfg.processor.inverse_kinematics.end_effector_step_sizes,
+                    motor_names=joint_names,
+                    use_latched_reference=False,
+                    use_ik_solution=True,
+                ),
+                EEBoundsAndSafety(
+                    end_effector_bounds=cfg.processor.inverse_kinematics.end_effector_bounds,
+                ),
+                GripperVelocityToJoint(
+                    clip_max=cfg.processor.max_gripper_pos,
+                    speed_factor=1.0,
+                    discrete_gripper=True,
+                ),
+                InverseKinematicsRLStep(
+                    kinematics=kinematics_solver, motor_names=joint_names, initial_guess_current_joints=False
+                ),
+            ]
+            action_pipeline_steps.extend(inverse_kinematics_steps)
+            action_pipeline_steps.append(RobotActionToPolicyActionProcessorStep(motor_names=joint_names))
 
-        env_pipeline_steps = [
-            Numpy2TorchActionProcessorStep(),
-            VanillaObservationProcessorStep(),
-            AddBatchDimensionProcessorStep(),
-            DeviceProcessorStep(device=device)
-        ]
-    
-        return DataProcessorPipeline(
-            steps=env_pipeline_steps, to_transition=identity_transition, to_output=identity_transition
-        ), DataProcessorPipeline(steps=action_pipeline_steps, to_transition=identity_transition, to_output=identity_transition)
+            env_pipeline_steps = [
+                Numpy2TorchActionProcessorStep(),
+                VanillaObservationProcessorStep(),
+                AddBatchDimensionProcessorStep(),
+                DeviceProcessorStep(device=device)
+            ]
+        
+            return DataProcessorPipeline(
+                steps=env_pipeline_steps, to_transition=identity_transition, to_output=identity_transition
+            ), DataProcessorPipeline(steps=action_pipeline_steps, to_transition=identity_transition, to_output=identity_transition)
 
     raise NotImplementedError("Real robot processors not implemented")
 
