@@ -33,6 +33,7 @@ from typing import Any
 import time
 import torch
 import numpy as np
+from pprint import pprint
 
 import leisaac
 import gymnasium as gym
@@ -55,7 +56,8 @@ from lerobot.processor import (
     TransitionKey,
     MapTensorToDeltaActionDictStep,
     MapDeltaActionToRobotActionStep,
-    RobotActionToPolicyActionProcessorStep
+    RobotActionToPolicyActionProcessorStep,
+    GripperPenaltyProcessorStep
 )
 from lerobot.robots.so100_follower.robot_kinematic_processor import (
     EEBoundsAndSafety,
@@ -76,6 +78,14 @@ from lerobot.utils.constants import ACTION, DONE, OBS_IMAGES, OBS_STATE, REWARD
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 logging.basicConfig(level=logging.INFO)
+
+# Teleop action features are {'shoulder_pan.pos': <class 'float'>, 'shoulder_lift.pos': <class 'float'>, 'elbow_flex.pos': <class 'float'>, 'wrist_flex.pos': <class 'float'>, 'wrist_roll.pos': <class 'float'>, 'gripper.pos': <class 'float'>}
+hc_joint_names = ["shoulder_pan",
+                  "shoulder_lift",
+                  "elbow_flex",
+                  "wrist_flex",
+                  "wrist_roll",
+                  "gripper"]
 
 @dataclass
 class DatasetConfig:
@@ -146,6 +156,26 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig, device: str) -> tuple[gym.Env, An
     # TODO Real robot environment
     raise NotImplementedError("Real robot environment not implemented yet")
 
+# NOTE: Neel can you check joint pos is in the order of shoulder -> gripper
+def get_raw_joint_positions(
+    obs: dict[str, Any],
+    joint_names: list[str],
+) -> dict[str, float]:
+    policy_obs = obs["policy"]
+    joint_pos = policy_obs["joint_pos"]  # shape: (B, N)
+
+    # assume batch size = 1
+    joint_pos = joint_pos[0]
+
+    assert len(joint_names) == joint_pos.shape[0], (
+        f"Expected {len(joint_names)} joints, got {joint_pos.shape[0]}"
+    )
+
+    return {
+        f"{name}.pos": joint_pos[i].item()
+        for i, name in enumerate(joint_names)
+    }
+
 
 
 def step_env_and_process_transition(
@@ -159,11 +189,11 @@ def step_env_and_process_transition(
     Execute one step with processor pipeline
     """
 
+    raw_joint_positions = get_raw_joint_positions(transition[TransitionKey.OBSERVATION], hc_joint_names)
     # Create action transition
     transition[TransitionKey.ACTION] = action
-    transition[TransitionKey.OBSERVATION] = (
-        env.get_raw_joint_positions() if hasattr(env, "get_raw_joint_positions") else {}
-    )
+    transition[TransitionKey.OBSERVATION] = raw_joint_positions
+
     processed_action_transition = action_processor(transition)
     processed_action = processed_action_transition[TransitionKey.ACTION]
 
@@ -179,7 +209,7 @@ def step_env_and_process_transition(
 
     new_transition = create_transition(
         observation=obs,
-        action=processed_action,
+        action=action,
         reward=reward,
         done=terminated,
         truncated=truncated,
@@ -297,8 +327,8 @@ def control_loop(env: gym.Env,
             )
             frame = {
                 **observations,
-                ACTION: action_to_record.cpu() if isinstance(action_to_record, torch.Tensor) else action_to_record.astype(np.float32),
-                REWARD: np.array([transition[TransitionKey.REWARD]], dtype=np.float32),
+                ACTION: action_to_record.squeeze(0).cpu() if isinstance(action_to_record, torch.Tensor) else action_to_record.astype(np.float32),
+                REWARD: transition[TransitionKey.REWARD].cpu() if isinstance(transition[TransitionKey.REWARD], torch.Tensor) else np.array([transition[TransitionKey.REWARD]], dtype=np.float32),
                 DONE: np.array([terminated or truncated], dtype=bool)
             }
             if use_gripper:
@@ -343,18 +373,6 @@ def control_loop(env: gym.Env,
 
     # TODO Push to hub
 
-def get_joint_names_from_urdf(urdf_path: str) -> list[str]:
-    try:
-        import placo
-    except ImportError as e:
-        raise ImportError(
-            "placo is required for RobotKinematics. "
-            "Please install the optional dependencies of `kinematics` in the package."
-        ) from e
-    robot = placo.RobotWrapper(urdf_path)
-
-    return list(robot.joint_names())
-
 
 def make_processors(
         env: gym.Env, teleop_device: Teleoperator | None, cfg: HILSerlRobotEnvConfig, device: str ="cpu"
@@ -364,7 +382,7 @@ def make_processors(
         cfg.processor.reset.terminate_on_success if cfg.processor.reset is not None else True
     )
 
-    joint_names = get_joint_names_from_urdf(cfg.processor.inverse_kinematics.urdf_path)
+    joint_names = hc_joint_names
     print(f"Joint names are {joint_names}")
 
     # Set up kinematics solver if inverse kinematics is configured
@@ -413,17 +431,42 @@ def make_processors(
             ]
             action_pipeline_steps.extend(inverse_kinematics_steps)
             action_pipeline_steps.append(RobotActionToPolicyActionProcessorStep(motor_names=joint_names))
+            action_pipeline_steps.append(AddBatchDimensionProcessorStep())
 
-            env_pipeline_steps = [
-                Numpy2TorchActionProcessorStep(),
-                VanillaObservationProcessorStep(),
-                AddBatchDimensionProcessorStep(),
-                DeviceProcessorStep(device=device)
-            ]
+        env_pipeline_steps = [VanillaObservationProcessorStep()]
+
+        # TODO Add Joint velocities
+        # TODO Add motor current
+
+        if kinematics_solver is not None:
+            env_pipeline_steps.append(
+                ForwardKinematicsJointsToEEObservation(
+                    kinematics=kinematics_solver,
+                    motor_names=joint_names,
+                )
+        )
+            
+        # TODO Consider adding image preprocessing
+        # TODO Consider adding time limit processor
+
+        # Add gripper penalty processor if gripper config exists and enabled
+        if cfg.processor.gripper is not None and cfg.processor.gripper.use_gripper:
+            env_pipeline_steps.append(
+                GripperPenaltyProcessorStep(
+                    penalty=cfg.processor.gripper.gripper_penalty,
+                    max_gripper_pos=cfg.processor.max_gripper_pos,
+                )
+            )
+
+        #note: Skipped reward classifier
         
-            return DataProcessorPipeline(
-                steps=env_pipeline_steps, to_transition=identity_transition, to_output=identity_transition
-            ), DataProcessorPipeline(steps=action_pipeline_steps, to_transition=identity_transition, to_output=identity_transition)
+
+        env_pipeline_steps.append(AddBatchDimensionProcessorStep())
+        env_pipeline_steps.append(DeviceProcessorStep(device=device))
+    
+        return DataProcessorPipeline(
+            steps=env_pipeline_steps, to_transition=identity_transition, to_output=identity_transition
+        ), DataProcessorPipeline(steps=action_pipeline_steps, to_transition=identity_transition, to_output=identity_transition)
 
     raise NotImplementedError("Real robot processors not implemented")
 

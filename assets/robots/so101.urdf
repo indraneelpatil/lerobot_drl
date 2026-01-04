@@ -361,7 +361,7 @@
     </collision>
   </link>
   <!-- Joint from gripper to moving_jaw_so101_v1 -->
-  <joint name="6" type="revolute">
+  <joint name="gripper" type="revolute">
     <origin xyz="0.0202 0.0188 -0.0234" rpy="1.5708 -5.24284e-08 -1.41553e-15"/>
     <parent link="gripper"/>
     <child link="moving_jaw_so101_v1"/>
@@ -369,7 +369,7 @@
     <limit effort="10" velocity="10" lower="-0.174533" upper="1.74533"/>
   </joint>
   <!-- Joint from wrist to gripper -->
-  <joint name="5" type="revolute">
+  <joint name="wrist_roll" type="revolute">
     <origin xyz="2.77556e-16 -0.0611 0.0181" rpy="1.5708 0.0486795 3.14159"/>
     <parent link="wrist"/>
     <child link="gripper"/>
@@ -377,7 +377,7 @@
     <limit effort="10" velocity="10" lower="-2.74385" upper="2.84121"/>
   </joint>
   <!-- Joint from lower_arm to wrist -->
-  <joint name="4" type="revolute">
+  <joint name="wrist_flex" type="revolute">
     <origin xyz="-0.1349 0.0052 8.44651e-17" rpy="4.02456e-15 8.67362e-16 -1.5708"/>
     <parent link="lower_arm"/>
     <child link="wrist"/>
@@ -385,7 +385,7 @@
     <limit effort="10" velocity="10" lower="-1.65806" upper="1.65806"/>
   </joint>
   <!-- Joint from upper_arm to lower_arm -->
-  <joint name="3" type="revolute">
+  <joint name="elbow_flex" type="revolute">
     <origin xyz="-0.11257 -0.028 2.09886e-16" rpy="-3.63608e-16 8.74301e-16 1.5708"/>
     <parent link="upper_arm"/>
     <child link="lower_arm"/>
@@ -393,7 +393,7 @@
     <limit effort="10" velocity="10" lower="-1.74533" upper="1.5708"/>
   </joint>
   <!-- Joint from shoulder to upper_arm -->
-  <joint name="2" type="revolute">
+  <joint name="shoulder_lift" type="revolute">
     <origin xyz="-0.0303992 -0.0182778 -0.0542" rpy="-1.5708 -1.5708 0"/>
     <parent link="shoulder"/>
     <child link="upper_arm"/>
@@ -401,7 +401,7 @@
     <limit effort="10" velocity="10" lower="-1.74533" upper="1.74533"/>
   </joint>
   <!-- Joint from base to shoulder -->
-  <joint name="1" type="revolute">
+  <joint name="shoulder_pan" type="revolute">
     <origin xyz="-0.124202 -0.168068 0.0948817" rpy="3.14159 4.18253e-17 -3.14159"/>
     <parent link="base"/>
     <child link="shoulder"/>
