@@ -39,7 +39,6 @@ import leisaac
 import gymnasium as gym
 from lerobot.configs import parser
 from lerobot.envs.configs import HILSerlRobotEnvConfig
-from lerobot.teleoperators.teleoperator import Teleoperator
 from lerobot.model.kinematics import RobotKinematics
 from lerobot.processor import (
     AddBatchDimensionProcessorStep,
@@ -74,6 +73,9 @@ from lerobot.teleoperators import (
     make_teleoperator_from_config,
     so101_leader,  # noqa: F401
 )
+from lerobot.teleoperators.keyboard import KeyboardEndEffectorTeleopConfig
+from lerobot.teleoperators.teleoperator import Teleoperator
+
 from lerobot.utils.constants import ACTION, DONE, OBS_IMAGES, OBS_STATE, REWARD
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
@@ -107,7 +109,7 @@ class GymManipulatorConfig:
     mode: str | None = None
     device: str = "cpu"
 
-def make_robot_env(cfg: HILSerlRobotEnvConfig, device: str) -> tuple[gym.Env, Any]:
+def make_robot_env(cfg: HILSerlRobotEnvConfig, device: str) -> tuple[gym.Env, Any, Any]:
     """Create robot environment
     
     """
@@ -128,7 +130,7 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig, device: str) -> tuple[gym.Env, An
             random_block_position=True,
         )
 
-        return env, None
+        return env, None, None
     
     if cfg.name == "gym_isaac_sim_hil" and cfg.task !=None :
         env_cfg = parse_env_cfg(cfg.task, device, num_envs=1)
@@ -151,7 +153,10 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig, device: str) -> tuple[gym.Env, An
         teleop_device = make_teleoperator_from_config(cfg.teleop)
         teleop_device.connect()
 
-        return env, teleop_device
+        keyboard_teleop_device = make_teleoperator_from_config(KeyboardEndEffectorTeleopConfig())
+        keyboard_teleop_device.connect()
+
+        return env, teleop_device, keyboard_teleop_device
 
     # TODO Real robot environment
     raise NotImplementedError("Real robot environment not implemented yet")
@@ -375,7 +380,7 @@ def control_loop(env: gym.Env,
 
 
 def make_processors(
-        env: gym.Env, teleop_device: Teleoperator | None, cfg: HILSerlRobotEnvConfig, device: str ="cpu"
+        env: gym.Env, teleop_device: Teleoperator | None, keyboard_teleop_device:  Teleoperator | None, cfg: HILSerlRobotEnvConfig, device: str ="cpu"
 ) -> tuple[DataProcessorPipeline[EnvTransition, EnvTransition], DataProcessorPipeline[EnvTransition, EnvTransition]]:
     """Create action processors"""
     terminate_on_success = (
@@ -395,8 +400,11 @@ def make_processors(
         )
 
     if cfg.name == "gym_isaac_sim_hil":
+        # Keyboard teleop added before leader so that leader overwrites keyboard teleop
         action_pipeline_steps = [
+            AddTeleopActionAsComplimentaryDataStep(teleop_device=keyboard_teleop_device),
             AddTeleopActionAsComplimentaryDataStep(teleop_device=teleop_device),
+            AddTeleopEventsAsInfoStep(teleop_device=keyboard_teleop_device),
             InterventionActionProcessorStep(
                 use_gripper=cfg.processor.gripper.use_gripper if cfg.processor.gripper is not None else False,
                 terminate_on_success=terminate_on_success),
@@ -473,8 +481,8 @@ def make_processors(
 @parser.wrap()
 def main(cfg: GymManipulatorConfig) -> None:
     """ Main entry """
-    env, teleop_device = make_robot_env(cfg.env, cfg.device)
-    env_processor, action_processor = make_processors(env, teleop_device, cfg.env, cfg.device)
+    env, teleop_device, keyboard_teleop_device = make_robot_env(cfg.env, cfg.device)
+    env_processor, action_processor = make_processors(env, teleop_device, keyboard_teleop_device, cfg.env, cfg.device)
 
     print("Environment observation space:", env.observation_space)
     print("Environment Action Space:", env.action_space)

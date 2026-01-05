@@ -7,10 +7,11 @@
         "teleop": {
             "type": "so101_leader",
             "id": "singles_inferno_dex_leader",
-            "port": "/dev/ttyACM1"
+            "port": "/dev/ttyACM1",
+            "use_degrees": true
         },
         "processor": {
-            "control_mode": "keyboard",
+            "control_mode": "so101leader",
             "gripper": {
                 "use_gripper": true,
                 "gripper_penalty": -0.02
