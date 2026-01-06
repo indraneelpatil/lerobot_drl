@@ -5,9 +5,8 @@
         "fps": 10,
         "robot": null,
         "teleop": {
-            "type": "so101_leader",
-            "id": "singles_inferno_dex_leader",
-            "port": "/dev/ttyACM1"
+            "type": "keyboard_ee",
+            "id": "singles_inferno_dex_keyboard"
         },
         "processor": {
             "control_mode": "keyboard",

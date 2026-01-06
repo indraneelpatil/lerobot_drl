@@ -397,6 +397,7 @@ def make_processors(
     if cfg.name == "gym_isaac_sim_hil":
         action_pipeline_steps = [
             AddTeleopActionAsComplimentaryDataStep(teleop_device=teleop_device),
+            AddTeleopEventsAsInfoStep(teleop_device=teleop_device),
             InterventionActionProcessorStep(
                 use_gripper=cfg.processor.gripper.use_gripper if cfg.processor.gripper is not None else False,
                 terminate_on_success=terminate_on_success),
