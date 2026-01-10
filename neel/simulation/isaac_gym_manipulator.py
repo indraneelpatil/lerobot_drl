@@ -197,7 +197,10 @@ def step_env_and_process_transition(
     processed_action_transition = action_processor(transition)
     processed_action = processed_action_transition[TransitionKey.ACTION]
 
-    obs, reward, terminated, truncated, info = env.step(processed_action)
+    # TODO: Neel move this to action processor
+    processed_action_rad = torch.deg2rad(processed_action)
+
+    obs, reward, terminated, truncated, info = env.step(processed_action_rad)
 
 
     reward = reward + processed_action_transition[TransitionKey.REWARD]
