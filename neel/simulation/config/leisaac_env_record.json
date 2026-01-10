@@ -22,7 +22,7 @@
             },
             "inverse_kinematics": {
                 "urdf_path": "/home/neel/Projects/lerobot_drl/assets/robots/so101.urdf",
-                "target_frame_name": "gripperframe",
+                "target_frame_name": "gripper_frame_link",
                 "end_effector_bounds": {
                     "min": [
                         -0.5,
