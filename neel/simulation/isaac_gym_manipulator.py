@@ -57,7 +57,8 @@ from lerobot.processor import (
     MapTensorToDeltaActionDictStep,
     MapDeltaActionToRobotActionStep,
     RobotActionToPolicyActionProcessorStep,
-    GripperPenaltyProcessorStep
+    GripperPenaltyProcessorStep,
+    Degrees2RadiansActionProcessorStep
 )
 from lerobot.robots.so100_follower.robot_kinematic_processor import (
     EEBoundsAndSafety,
@@ -197,10 +198,7 @@ def step_env_and_process_transition(
     processed_action_transition = action_processor(transition)
     processed_action = processed_action_transition[TransitionKey.ACTION]
 
-    # TODO: Neel move this to action processor
-    processed_action_rad = torch.deg2rad(processed_action)
-
-    obs, reward, terminated, truncated, info = env.step(processed_action_rad)
+    obs, reward, terminated, truncated, info = env.step(processed_action)
 
 
     reward = reward + processed_action_transition[TransitionKey.REWARD]
@@ -453,6 +451,7 @@ def make_processors(
             action_pipeline_steps.extend(inverse_kinematics_steps)
             action_pipeline_steps.append(RobotActionToPolicyActionProcessorStep(motor_names=joint_names))
             action_pipeline_steps.append(AddBatchDimensionProcessorStep())
+            action_pipeline_steps.append(Degrees2RadiansActionProcessorStep())
 
         env_pipeline_steps = [VanillaObservationProcessorStep()]
 
