@@ -229,10 +229,13 @@ def reset_robot_pose(env: gym.Env, cfg: HILSerlRobotEnvConfig) -> tuple[dict[str
     reset_action = torch.tensor(reset_action, dtype=torch.float32)
     reset_action = reset_action.unsqueeze(0)
 
-    obs, reward, terminated, truncated, info = env.step(reset_action)
-
     print("=====================================Waiting for reset!")
-    busy_wait(cfg.processor.reset.reset_time_s)
+    reset_start = time.perf_counter()
+    while time.perf_counter()-reset_start < cfg.processor.reset.reset_time_s:
+
+        obs, reward, terminated, truncated, info = env.step(reset_action)
+        busy_wait(0.01)
+
     print("=====================================Reset done!!")
 
     return obs, info
