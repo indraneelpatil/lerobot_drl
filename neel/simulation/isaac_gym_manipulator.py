@@ -221,24 +221,6 @@ def step_env_and_process_transition(
 
     return new_transition
 
-def reset_robot_pose(env: gym.Env, cfg: HILSerlRobotEnvConfig) -> tuple[dict[str, Any], dict[str, Any] ]:
-    
-    reset_action = cfg.processor.reset.fixed_reset_joint_positions
-    assert reset_action is not None
-
-    reset_action = torch.tensor(reset_action, dtype=torch.float32)
-    reset_action = reset_action.unsqueeze(0)
-
-    print("=====================================Waiting for reset!")
-    reset_start = time.perf_counter()
-    while time.perf_counter()-reset_start < cfg.processor.reset.reset_time_s:
-
-        obs, reward, terminated, truncated, info = env.step(reset_action)
-        busy_wait(0.01)
-
-    print("=====================================Reset done!!")
-
-    return obs, info
 
 def control_loop(env: gym.Env,
                  env_processor: DataProcessorPipeline[EnvTransition, EnvTransition],
@@ -255,7 +237,6 @@ def control_loop(env: gym.Env,
 
     # Reset environment
     obs, info = env.reset()
-    obs, info = reset_robot_pose(env, cfg.env)
     complimentary_data = (
         {"raw_joint_positions": info.pop("raw_joint_positions")} if "raw_joint_positions" in info else {}
     )
@@ -381,7 +362,6 @@ def control_loop(env: gym.Env,
 
             # Reset for new episode
             obs, info = env.reset()
-            obs, info = reset_robot_pose(env, cfg.env)
             env_processor.reset()
             action_processor.reset()
 
