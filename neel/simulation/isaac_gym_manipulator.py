@@ -58,7 +58,8 @@ from lerobot.processor import (
     MapDeltaActionToRobotActionStep,
     RobotActionToPolicyActionProcessorStep,
     GripperPenaltyProcessorStep,
-    Degrees2RadiansActionProcessorStep
+    Degrees2RadiansActionProcessorStep,
+    Radians2DegreesObservationProcessor,
 )
 from lerobot.robots.so100_follower.robot_kinematic_processor import (
     EEBoundsAndSafety,
@@ -152,31 +153,65 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig, device: str) -> tuple[gym.Env, An
         teleop_device = make_teleoperator_from_config(cfg.teleop)
         teleop_device.connect()
 
-        return env, teleop_device
+        # Wrap the environment
+        env_wrapped = IsaacSimEnvWrapper(env)
+
+        return env_wrapped, teleop_device
 
     # TODO Real robot environment
     raise NotImplementedError("Real robot environment not implemented yet")
 
-# NOTE: Neel can you check joint pos is in the order of shoulder -> gripper
-def get_raw_joint_positions(
-    obs: dict[str, Any],
-    joint_names: list[str],
-) -> dict[str, float]:
-    policy_obs = obs["policy"]
-    joint_pos = policy_obs["joint_pos"]  # shape: (B, N)
+class IsaacSimEnvWrapper(gym.Wrapper):
+    def __init__(
+        self,
+        env,):
+        """Init the wrapper"""
+        super().__init__(env)
+        self._raw_joint_positions = None
 
-    # assume batch size = 1
-    joint_pos = joint_pos[0]
+    def convert_joint_angle_tensor_to_dict(self, joint_pos):
+        joint_pos = joint_pos[0]
 
-    assert len(joint_names) == joint_pos.shape[0], (
-        f"Expected {len(joint_names)} joints, got {joint_pos.shape[0]}"
-    )
+        assert len(hc_joint_names) == joint_pos.shape[0], (
+            f"Expected {len(hc_joint_names)} joints, got {joint_pos.shape[0]}"
+        )
 
-    return {
-        f"{name}.pos": joint_pos[i].item()
-        for i, name in enumerate(joint_names)
-    }
+        return {
+            f"{name}.pos": joint_pos[i].item()
+            for i, name in enumerate(hc_joint_names)
+        }
 
+    def step(self, action):
+        # Step the environment
+        obs, reward, terminated, truncated, info = self.env.step(action)
+
+        # Update raw joint positions
+        policy_obs = obs["policy"]
+        joint_pos = policy_obs["joint_pos"]  # shape: (B, N)
+
+        joint_angle_dict = self.convert_joint_angle_tensor_to_dict(joint_pos)
+        self._raw_joint_positions = joint_angle_dict
+
+        return joint_angle_dict, reward, terminated, truncated, info
+    
+    def reset(self, **kwargs):
+        """Reset the environment."""
+        # Update raw joint positions
+
+        obs, info = self.env.reset(**kwargs)
+
+        # Update raw joint positions
+        policy_obs = obs["policy"]
+        joint_pos = policy_obs["joint_pos"]  # shape: (B, N)
+
+        joint_angle_dict = self.convert_joint_angle_tensor_to_dict(joint_pos)
+        self._raw_joint_positions = joint_angle_dict
+
+        return joint_angle_dict, info
+    
+    def get_raw_joint_positions(self) -> dict[str, float]:
+        """Get raw joint positions."""
+        return self._raw_joint_positions
 
 
 def step_env_and_process_transition(
@@ -190,10 +225,11 @@ def step_env_and_process_transition(
     Execute one step with processor pipeline
     """
 
-    raw_joint_positions = get_raw_joint_positions(transition[TransitionKey.OBSERVATION], hc_joint_names)
     # Create action transition
     transition[TransitionKey.ACTION] = action
-    transition[TransitionKey.OBSERVATION] = raw_joint_positions
+    transition[TransitionKey.OBSERVATION] = (
+        env.get_raw_joint_positions() if hasattr(env, "get_raw_joint_positions") else {}
+    )
 
     processed_action_transition = action_processor(transition)
     processed_action = processed_action_transition[TransitionKey.ACTION]
@@ -227,6 +263,7 @@ def control_loop(env: gym.Env,
                  action_processor: DataProcessorPipeline[EnvTransition, EnvTransition],
                 cfg: GymManipulatorConfig):
     """ Main control loop for environment interaction"""
+
     dt = 1.0 / cfg.env.fps
 
     print(f"Starting control loop at {cfg.env.fps} FPS")
@@ -436,7 +473,10 @@ def make_processors(
             action_pipeline_steps.append(AddBatchDimensionProcessorStep())
             action_pipeline_steps.append(Degrees2RadiansActionProcessorStep())
 
-        env_pipeline_steps = [VanillaObservationProcessorStep()]
+        env_pipeline_steps = [
+            Radians2DegreesObservationProcessor(),
+            VanillaObservationProcessorStep()]
+
 
         # TODO Add Joint velocities
         # TODO Add motor current
