@@ -177,7 +177,7 @@ class IsaacSimEnvWrapper(gym.Wrapper):
         )
 
         return {
-            f"{name}.pos": joint_pos[i].item()
+            f"{name}.pos": np.rad2deg(joint_pos[i].item())
             for i, name in enumerate(hc_joint_names)
         }
 
@@ -210,7 +210,7 @@ class IsaacSimEnvWrapper(gym.Wrapper):
         return joint_angle_dict, info
     
     def get_raw_joint_positions(self) -> dict[str, float]:
-        """Get raw joint positions."""
+        """Get raw joint positions in degrees."""
         return self._raw_joint_positions
 
 
