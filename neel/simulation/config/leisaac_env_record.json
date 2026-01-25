@@ -44,7 +44,7 @@
         }
     },
     "dataset": {
-        "repo_id": "indraneelpatil/franka_sim_pick_lift_sim4",
+        "repo_id": "indraneelpatil/isaac_sim_pick_lift_sim",
         "root": null,
         "task": "LeIsaac-SO101-LiftCube-v0",
         "num_episodes_to_record": 30,

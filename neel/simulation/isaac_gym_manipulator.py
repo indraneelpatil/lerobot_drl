@@ -138,10 +138,10 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig, device: str) -> tuple[gym.Env, An
         env_cfg.seed = int(time.time())
 
         # Modify configuration
-        if hasattr(env_cfg.terminations, "time_out"):
-            env_cfg.terminations.time_out = None
-        if hasattr(env_cfg.terminations, "success"):
-            env_cfg.terminations.success = None
+        # if hasattr(env_cfg.terminations, "time_out"):
+        #     env_cfg.terminations.time_out = None
+        # if hasattr(env_cfg.terminations, "success"):
+        #     env_cfg.terminations.success = None
         
         # TODO recording
         env_cfg.recorders = None
@@ -282,7 +282,6 @@ def control_loop(env: gym.Env,
 
     # Process initial observation
     transition = create_transition(observation=obs, info=info, complementary_data=complimentary_data)
-    # print(f"Observation is {obs}")
     transition = env_processor(data=transition)
 
     # Check gripper
@@ -353,6 +352,9 @@ def control_loop(env: gym.Env,
         terminated = transition.get(TransitionKey.DONE, False)
         truncated = transition.get(TransitionKey.TRUNCATED, False)
 
+        terminated = terminated.squeeze(0).cpu() if isinstance(terminated, torch.Tensor) else terminated
+        truncated = truncated.squeeze(0).cpu() if isinstance(truncated, torch.Tensor) else truncated
+
         if cfg.mode == "record":
             observations = {
                 k: v.squeeze(0).cpu() 
@@ -409,7 +411,9 @@ def control_loop(env: gym.Env,
         # Maintain fps timing
         busy_wait(dt - (time.perf_counter() - step_start_time))
 
-    # TODO Push to hub
+    if dataset is not None and cfg.dataset.push_to_hub:
+        logging.info("Pushing dataset to hub")
+        dataset.push_to_hub()
 
 
 def make_processors(
