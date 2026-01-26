@@ -139,6 +139,8 @@ def step_env_and_process_transition(
 
     obs, reward, terminated, truncated, info = env.step(processed_action)
 
+    print(f"raw observation is {obs}")
+
 
     reward = reward + processed_action_transition[TransitionKey.REWARD]
     terminated = terminated or processed_action_transition[TransitionKey.DONE]
@@ -257,6 +259,8 @@ def control_loop(env: gym.Env,
         terminated = transition.get(TransitionKey.DONE, False)
         truncated = transition.get(TransitionKey.TRUNCATED, False)
 
+
+        print(f"Observation is {transition[TransitionKey.OBSERVATION]}")
         if cfg.mode == "record":
             observations = {
                 k: v.squeeze(0).cpu() 

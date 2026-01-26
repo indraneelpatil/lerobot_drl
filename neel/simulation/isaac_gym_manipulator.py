@@ -178,7 +178,7 @@ class IsaacSimEnvWrapper(gym.Wrapper):
         )
 
         return {
-            f"{name}.pos": np.rad2deg(joint_pos[i].item())
+            f"{name}.pos": joint_pos[i].item()
             for i, name in enumerate(hc_joint_names)
         }
     
@@ -210,14 +210,17 @@ class IsaacSimEnvWrapper(gym.Wrapper):
         # Update raw joint positions
 
         obs, info = self.env.reset(**kwargs)
-
         lerobot_obs = self._get_observation(obs)
 
         return lerobot_obs, info
     
     def get_raw_joint_positions(self) -> dict[str, float]:
         """Get raw joint positions in degrees."""
-        return self._raw_joint_positions
+
+        raw_joint_positions_deg = {}
+        for k,v in self._raw_joint_positions.items():
+            raw_joint_positions_deg[k] = np.rad2deg(v)
+        return raw_joint_positions_deg
 
 
 def step_env_and_process_transition(
