@@ -60,6 +60,7 @@ from lerobot.processor import (
     GripperPenaltyProcessorStep,
     Degrees2RadiansActionProcessorStep,
     Radians2DegreesObservationProcessor,
+    AddProcessorObservationsToState
 )
 from lerobot.robots.so100_follower.robot_kinematic_processor import (
     EEBoundsAndSafety,
@@ -180,19 +181,29 @@ class IsaacSimEnvWrapper(gym.Wrapper):
             f"{name}.pos": np.rad2deg(joint_pos[i].item())
             for i, name in enumerate(hc_joint_names)
         }
+    
+    def _get_observation(self, raw_obs):
+        # Update raw joint positions
+        policy_obs = raw_obs["policy"]
+        joint_pos = policy_obs["joint_pos"]  # shape: (B, N)
+
+        joint_angle_dict = self.convert_joint_angle_tensor_to_dict(joint_pos)
+        self._raw_joint_positions = joint_angle_dict
+        joint_positions = np.array([joint_angle_dict[f"{name}.pos"] for name in hc_joint_names])
+
+        # Process images
+        camera_keys = ["front", "wrist"]
+        images = {key: policy_obs[key] for key in camera_keys}
+
+        return {"agent_pos": joint_positions, "pixels": images, **joint_angle_dict}
 
     def step(self, action):
         # Step the environment
         obs, reward, terminated, truncated, info = self.env.step(action)
 
-        # Update raw joint positions
-        policy_obs = obs["policy"]
-        joint_pos = policy_obs["joint_pos"]  # shape: (B, N)
+        lerobot_obs = self._get_observation(obs)
 
-        joint_angle_dict = self.convert_joint_angle_tensor_to_dict(joint_pos)
-        self._raw_joint_positions = joint_angle_dict
-
-        return joint_angle_dict, reward, terminated, truncated, info
+        return lerobot_obs, reward, terminated, truncated, info
     
     def reset(self, **kwargs):
         """Reset the environment."""
@@ -200,14 +211,9 @@ class IsaacSimEnvWrapper(gym.Wrapper):
 
         obs, info = self.env.reset(**kwargs)
 
-        # Update raw joint positions
-        policy_obs = obs["policy"]
-        joint_pos = policy_obs["joint_pos"]  # shape: (B, N)
+        lerobot_obs = self._get_observation(obs)
 
-        joint_angle_dict = self.convert_joint_angle_tensor_to_dict(joint_pos)
-        self._raw_joint_positions = joint_angle_dict
-
-        return joint_angle_dict, info
+        return lerobot_obs, info
     
     def get_raw_joint_positions(self) -> dict[str, float]:
         """Get raw joint positions in degrees."""
@@ -240,7 +246,7 @@ def step_env_and_process_transition(
     reward = reward + processed_action_transition[TransitionKey.REWARD]
     terminated = terminated or processed_action_transition[TransitionKey.DONE]
     truncated = truncated or processed_action_transition[TransitionKey.TRUNCATED]
-    complementary_data= processed_action_transition[TransitionKey.COMPLEMENTARY_DATA]
+    complementary_data= processed_action_transition[TransitionKey.COMPLEMENTARY_DATA].copy()
     new_info = processed_action_transition[TransitionKey.INFO].copy()
     new_info.update(info)
 
@@ -362,7 +368,7 @@ def control_loop(env: gym.Env,
                 if isinstance(v, torch.Tensor)
             }
             # Use teleop_action if available, otherwise use the action from the transition
-            action_to_record = transition[TransitionKey.INFO].get(
+            action_to_record = transition[TransitionKey.COMPLEMENTARY_DATA].get(
                 "teleop_action", transition[TransitionKey.ACTION]
             )
             frame = {
@@ -372,7 +378,7 @@ def control_loop(env: gym.Env,
                 DONE: np.array([terminated or truncated], dtype=bool)
             }
             if use_gripper:
-                discrete_penalty = transition[TransitionKey.INFO].get("discrete_penalty", 0.0)
+                discrete_penalty = transition[TransitionKey.COMPLEMENTARY_DATA].get("discrete_penalty", 0.0)
                 frame["complementary_info.discrete_penalty"] = np.array([discrete_penalty], dtype=np.float32)
             
             if dataset is not None:
@@ -491,6 +497,9 @@ def make_processors(
                     kinematics=kinematics_solver,
                     motor_names=joint_names,
                 )
+        )
+        env_pipeline_steps.append(
+            AddProcessorObservationsToState()
         )
             
         # TODO Consider adding image preprocessing
