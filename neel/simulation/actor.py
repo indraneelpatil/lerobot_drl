@@ -360,8 +360,18 @@ def log_policy_frequency_issue(policy_fps: float, cfg: TrainRLServerPipelineConf
 def update_policy_parameters(policy: SACPolicy, parameters_queue: Queue, device):
     bytes_state_dict = get_last_item_from_queue(parameters_queue, block=False)
     if bytes_state_dict is not None:
-        logging.info("[ACTOR] Load new parameters from learner.")
+        logging.info("[ACTOR] Load new parameters from Learner.")
         state_dicts = bytes_to_state_dict(bytes_state_dict)
+
+        # TODO: check encoder parameter synchronization possible issues:
+        # 1. When shared_encoder=True, we're loading stale encoder params from actor's state_dict
+        #    instead of the updated encoder params from critic (which is optimized separately)
+        # 2. When freeze_vision_encoder=True, we waste bandwidth sending/loading frozen params
+        # 3. Need to handle encoder params correctly for both actor and discrete_critic
+        # Potential fixes:
+        # - Send critic's encoder state when shared_encoder=True
+        # - Skip encoder params entirely when freeze_vision_encoder=True
+        # - Ensure discrete_critic gets correct encoder state (currently uses encoder_critic)
 
         # Load actor state dict
         actor_state_dict = move_state_dict_to_device(state_dicts["policy"], device=device)
@@ -377,7 +387,13 @@ def update_policy_parameters(policy: SACPolicy, parameters_queue: Queue, device)
 
 
 def push_transitions_to_transport_queue(transitions: list, transitions_queue):
-    """Send transitions to learner in smaller chunks to avoid network issues"""
+    """Send transitions to learner in smaller chunks to avoid network issues.
+
+    Args:
+        transitions: List of transitions to send
+        message_queue: Queue to send messages to learner
+        chunk_size: Size of each chunk to send
+    """
     transition_to_send_to_learner = []
     for transition in transitions:
         tr = move_transition_to_device(transition=transition, device="cpu")
@@ -386,12 +402,19 @@ def push_transitions_to_transport_queue(transitions: list, transitions_queue):
                 logging.warning(f"Found NaN values in transition {key}")
 
         transition_to_send_to_learner.append(tr)
-    
+
     transitions_queue.put(transitions_to_bytes(transition_to_send_to_learner))
 
 
 def get_frequency_stats(timer: TimerManager) -> dict[str, float]:
-    """Get the frequency statistics of the policy"""
+    """Get the frequency statistics of the policy.
+
+    Args:
+        timer (TimerManager): The timer with collected metrics.
+
+    Returns:
+        dict[str, float]: The frequency statistics of the policy.
+    """
     stats = {}
     if timer.count > 1:
         avg_fps = timer.fps_avg
@@ -400,7 +423,7 @@ def get_frequency_stats(timer: TimerManager) -> dict[str, float]:
         logging.debug(f"[ACTOR] Policy frame rate 90th percentile: {p90_fps}")
         stats = {
             "Policy frequency [Hz]": avg_fps,
-            "Policy frequency 90th-p [Hz]": p90_fps
+            "Policy frequency 90th-p [Hz]": p90_fps,
         }
     return stats
 
