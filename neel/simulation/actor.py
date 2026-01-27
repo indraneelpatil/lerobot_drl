@@ -407,11 +407,17 @@ def get_frequency_stats(timer: TimerManager) -> dict[str, float]:
 
 def establish_learner_connection(
     stub: services_pb2_grpc.LearnerServiceStub,
-    shutdown_event: Event, # type: ignore
+    shutdown_event: Event,  # type: ignore
     attempts: int = 30,
 ):
-    """
-        Establish a connection with learner
+    """Establish a connection with the learner.
+
+    Args:
+        stub (services_pb2_grpc.LearnerServiceStub): The stub to use for the connection.
+        shutdown_event (Event): The event to check if the connection should be established.
+        attempts (int): The number of attempts to establish the connection.
+    Returns:
+        bool: True if the connection is established, False otherwise.
     """
     for _ in range(attempts):
         if shutdown_event.is_set():
@@ -426,7 +432,7 @@ def establish_learner_connection(
         except grpc.RpcError as e:
             logging.error(f"[ACTOR] Waiting for Learner to be ready... {e}")
             time.sleep(2)
-    return False 
+    return False
 
 # Run function only once and cache the result
 @lru_cache(maxsize=1)
@@ -435,11 +441,15 @@ def learner_service_client(
     port: int = 50051,
 ) -> tuple[services_pb2_grpc.LearnerServiceStub, grpc.Channel]:
     """
-    Returns a client for the learner service
+    Returns a client for the learner service.
+
+    GRPC uses HTTP/2, which is a binary protocol and multiplexes requests over a single connection.
+    So we need to create only one client and reuse it.
     """
+
     channel = grpc.insecure_channel(
-       f"{host}:{port}",
-       grpc_channel_options() 
+        f"{host}:{port}",
+        grpc_channel_options(),
     )
     stub = services_pb2_grpc.LearnerServiceStub(channel)
     logging.info("[ACTOR] Learner service client created")
@@ -447,25 +457,32 @@ def learner_service_client(
 
 
 def receive_policy(
-        cfg: TrainRLServerPipelineConfig,
-        parameters_queue: Queue,
-        shutdown_event: Event, # type: ignore
-        learner_client: services_pb2_grpc.LearnerServiceStub | None = None,
-        grpc_channel: grpc.Channel | None = None,
+    cfg: TrainRLServerPipelineConfig,
+    parameters_queue: Queue,
+    shutdown_event: Event,  # type: ignore
+    learner_client: services_pb2_grpc.LearnerServiceStub | None = None,
+    grpc_channel: grpc.Channel | None = None,
 ):
-    """ Receive parameters from the learner"""
-    logging.info("[ACTOR] Start receiving parameters from the learner")
+    """Receive parameters from the learner.
+
+    Args:
+        cfg (TrainRLServerPipelineConfig): The configuration for the actor.
+        parameters_queue (Queue): The queue to receive the parameters.
+        shutdown_event (Event): The event to check if the process should shutdown.
+    """
+    logging.info("[ACTOR] Start receiving parameters from the Learner")
     if not use_threads(cfg):
-        # Create a process specific log file
+        # Create a process-specific log file
         log_dir = os.path.join(cfg.output_dir, "logs")
         os.makedirs(log_dir, exist_ok=True)
-        log_file = os.path.join(log_dir, f"actor_receive_policy_{os.get_pid()}.log")
+        log_file = os.path.join(log_dir, f"actor_receive_policy_{os.getpid()}.log")
 
         # Initialize logging with explicit log file
         init_logging(log_file=log_file, display_pid=True)
         logging.info("Actor receive policy process logging initialized")
 
-        # Setup process handlers
+        # Setup process handlers to handle shutdown signal
+        # But use shutdown event from the main process
         _ = ProcessSignalHandler(use_threads=False, display_pid=True)
 
     if grpc_channel is None or learner_client is None:
@@ -473,15 +490,16 @@ def receive_policy(
             host=cfg.policy.actor_learner_config.learner_host,
             port=cfg.policy.actor_learner_config.learner_port,
         )
-    
+
     try:
         iterator = learner_client.StreamParameters(services_pb2.Empty())
         receive_bytes_in_chunks(
             iterator,
             parameters_queue,
             shutdown_event,
-            log_prefix="[ACTOR] parameters"
+            log_prefix="[ACTOR] parameters",
         )
+
     except grpc.RpcError as e:
         logging.error(f"[ACTOR] gRPC error: {e}")
 
@@ -490,18 +508,27 @@ def receive_policy(
     logging.info("[ACTOR] Received policy loop stopped")
 
 
+
 def send_transitions(
-        cfg: TrainRLServerPipelineConfig,
-        transitions_queue: Queue,
-        shutdown_event: any, # Event
-        learner_client: services_pb2_grpc.LearnerServiceStub | None = None,
-        grpc_channel: grpc.Channel | None = None,
+    cfg: TrainRLServerPipelineConfig,
+    transitions_queue: Queue,
+    shutdown_event: any,  # Event,
+    learner_client: services_pb2_grpc.LearnerServiceStub | None = None,
+    grpc_channel: grpc.Channel | None = None,
 ) -> services_pb2.Empty:
     """
-    Sends environment transitions to the learner
+    Sends transitions to the learner.
+
+    This function continuously retrieves messages from the queue and processes:
+
+    - Transition Data:
+        - A batch of transitions (observation, action, reward, next observation) is collected.
+        - Transitions are moved to the CPU and serialized using PyTorch.
+        - The serialized data is wrapped in a `services_pb2.Transition` message and sent to the learner.
     """
+
     if not use_threads(cfg):
-        # Create a process specific log file
+        # Create a process-specific log file
         log_dir = os.path.join(cfg.output_dir, "logs")
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, f"actor_transitions_{os.getpid()}.log")
@@ -509,7 +536,7 @@ def send_transitions(
         # Initialize logging with explicit log file
         init_logging(log_file=log_file, display_pid=True)
         logging.info("Actor transitions process logging initialized")
-    
+
     if grpc_channel is None or learner_client is None:
         learner_client, grpc_channel = learner_service_client(
             host=cfg.policy.actor_learner_config.learner_host,
@@ -531,14 +558,14 @@ def send_transitions(
         grpc_channel.close()
     logging.info("[ACTOR] Transitions process stopped")
 
-def transitions_stream(shutdown_event: Event, transitions_queue: Queue, timeout: float) -> services_pb2.Empty: # type: ignore
+def transitions_stream(shutdown_event: Event, transitions_queue: Queue, timeout: float) -> services_pb2.Empty:  # type: ignore
     while not shutdown_event.is_set():
         try:
             message = transitions_queue.get(block=True, timeout=timeout)
         except Empty:
-            logging.debug("[ACTOR] Transitions queue is empty")
+            logging.debug("[ACTOR] Transition queue is empty")
             continue
-        
+
         yield from send_bytes_in_chunks(
             message, services_pb2.Transition, log_prefix="[ACTOR] Send transitions"
         )
@@ -548,16 +575,22 @@ def transitions_stream(shutdown_event: Event, transitions_queue: Queue, timeout:
 def send_interactions(
     cfg: TrainRLServerPipelineConfig,
     interactions_queue: Queue,
-    shutdown_event: Event, # type: ignore,
+    shutdown_event: Event,  # type: ignore
     learner_client: services_pb2_grpc.LearnerServiceStub | None = None,
     grpc_channel: grpc.Channel | None = None,
 ) -> services_pb2.Empty:
     """
-    Sends useful interaction stats to the learner
+    Sends interactions to the learner.
+
+    This function continuously retrieves messages from the queue and processes:
+
+    - Interaction Messages:
+        - Contains useful statistics about episodic rewards and policy timings.
+        - The message is serialized using `pickle` and sent to the learner.
     """
 
     if not use_threads(cfg):
-        # Create a process specific log file
+        # Create a process-specific log file
         log_dir = os.path.join(cfg.output_dir, "logs")
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, f"actor_interactions_{os.getpid()}.log")
@@ -567,17 +600,20 @@ def send_interactions(
         logging.info("Actor interactions process logging initialized")
 
         # Setup process handlers to handle shutdown signal
+        # But use shutdown event from the main process
         _ = ProcessSignalHandler(use_threads=False, display_pid=True)
-    
+
     if grpc_channel is None or learner_client is None:
         learner_client, grpc_channel = learner_service_client(
             host=cfg.policy.actor_learner_config.learner_host,
-            port=cfg.policy.actor_learner_config.learner_port
+            port=cfg.policy.actor_learner_config.learner_port,
         )
 
     try:
         learner_client.SendInteractions(
-            interactions_stream()
+            interactions_stream(
+                shutdown_event, interactions_queue, cfg.policy.actor_learner_config.queue_get_timeout
+            )
         )
     except grpc.RpcError as e:
         logging.error(f"[ACTOR] gRPC error: {e}")
@@ -591,7 +627,7 @@ def send_interactions(
 def interactions_stream(
     shutdown_event: Event,
     interactions_queue: Queue,
-    timeout: float,
+    timeout: float,  # type: ignore
 ) -> services_pb2.Empty:
     while not shutdown_event.is_set():
         try:
@@ -599,12 +635,13 @@ def interactions_stream(
         except Empty:
             logging.debug("[ACTOR] Interaction queue is empty")
             continue
-        
+
         yield from send_bytes_in_chunks(
             message,
             services_pb2.InteractionMessage,
-            log_prefix="[ACTOR] Send interactions"
+            log_prefix="[ACTOR] Send interactions",
         )
+
     return services_pb2.Empty()
 
 
