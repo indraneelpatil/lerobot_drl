@@ -59,6 +59,12 @@ from lerobot.utils.utils import (
 from lerobot.policies.sac.modeling_sac import SACPolicy
 from lerobot.policies.factory import make_policy
 from lerobot.teleoperators.utils import TeleopEvents
+from lerobot.teleoperators import (
+    gamepad,  # noqa: F401
+    keyboard,  # noqa: F401
+    make_teleoperator_from_config,
+    so101_leader,  # noqa: F401
+)
 
 from .learner_service import MAX_WORKERS, SHUTDOWN_TIMEOUT, LearnerService
 

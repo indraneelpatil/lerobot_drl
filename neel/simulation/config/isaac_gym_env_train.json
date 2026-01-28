@@ -19,7 +19,7 @@
         "disable_artifact": true
     },
     "dataset": {
-        "repo_id": "indraneelpatil/isaac_sim_pick_lift_sim4",
+        "repo_id": "indraneelpatil/isaac_sim_pick_lift_sim5",
         "use_imagenet_stats": false
     },
     "env": {
@@ -64,6 +64,12 @@
                 "y": 0.025,
                 "z": 0.025
                 }
+            },
+             "image_preprocessing": {
+                "crop_params_dict": {
+                  "observation.images.top": [49, 189, 262, 305]
+                },
+                "resize_size": [128, 128]            
             }
         },
         "features": {
