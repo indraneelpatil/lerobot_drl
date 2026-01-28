@@ -40,11 +40,17 @@
                 "y": 0.025,
                 "z": 0.025
                 }
+            },
+             "image_preprocessing": {
+                "crop_params_dict": {
+                  "observation.images.top": [49, 189, 262, 305]
+                },
+                "resize_size": [128, 128]            
             }
         }
     },
     "dataset": {
-        "repo_id": "indraneelpatil/isaac_sim_pick_lift_sim4",
+        "repo_id": "indraneelpatil/isaac_sim_pick_lift_sim5",
         "root": null,
         "task": "LeIsaac-SO101-LiftCube-v0",
         "num_episodes_to_record": 30,

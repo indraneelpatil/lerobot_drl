@@ -1,6 +1,8 @@
 # !/usr/bin/env python
 """
 Created by Indraneel on 12/29/2025
+
+python -m simulation.isaac_gym_manipulator --config_path simulation/config/leisaac_env_record.json
 """
 
 
