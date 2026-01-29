@@ -3,6 +3,8 @@
 Created by Indraneel on 01/27/2025
 
 Isaac gym actor process
+
+python -m simulation.isaac_gym_actor --config_path simulation/config/isaac_gym_env_train.json
 """
 
 
@@ -28,6 +30,8 @@ simulation_app = app_launcher.app
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab_tasks.utils import parse_env_cfg
 from isaaclab.managers import TerminationTermCfg, DatasetExportMode
+from isaaclab.sim import SimulationCfg, SimulationContext
+
 
 
 import logging
@@ -74,7 +78,7 @@ from lerobot.utils.utils import (
     init_logging,
 )
 
-from .isaac_gym_manipulator import (
+from .isaac_gym_utils import (
     create_transition,
     make_processors,
     make_robot_env,
@@ -229,7 +233,8 @@ def act_with_policy(
 
     logging.info("make_env online")
 
-    online_env, teleop_device = make_robot_env(cfg=cfg.env)
+    # TODO(Neel) Fix hardcoding
+    online_env, teleop_device = make_robot_env(cfg.env, "cuda")
     env_processor, action_processor = make_processors(online_env, teleop_device, cfg.env, cfg.policy.device)
 
     set_seed(cfg.seed)
@@ -391,6 +396,10 @@ def act_with_policy(
         if cfg.env.fps is not None:
             dt_time = time.perf_counter() - start_time
             busy_wait(1 / cfg.env.fps - dt_time)
+    
+    # Close the simulator
+    online_env.close()
+    simulation_app.close()
 
 
 if __name__ == "__main__":

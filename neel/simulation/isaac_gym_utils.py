@@ -36,7 +36,8 @@ from lerobot.processor import (
     GripperPenaltyProcessorStep,
     Degrees2RadiansActionProcessorStep,
     Radians2DegreesObservationProcessor,
-    AddProcessorObservationsToState
+    AddProcessorObservationsToState,
+    ImageCropResizeProcessorStep
 )
 from lerobot.robots.so100_follower.robot_kinematic_processor import (
     EEBoundsAndSafety,
@@ -304,8 +305,15 @@ def make_processors(
         env_pipeline_steps.append(
             AddProcessorObservationsToState()
         )
-            
-        # TODO Consider adding image preprocessing
+
+        if cfg.processor.image_preprocessing is not None:
+            env_pipeline_steps.append(
+                ImageCropResizeProcessorStep(
+                    crop_params_dict=cfg.processor.image_preprocessing.crop_params_dict,
+                    resize_size=cfg.processor.image_preprocessing.resize_size,
+                )
+            ) 
+        
         # TODO Consider adding time limit processor
 
         # Add gripper penalty processor if gripper config exists and enabled
