@@ -1,7 +1,8 @@
 # Porting HIL-SERL to the robot
 
-1. Add leader arm teleop (currently it is keyboard)
-2. Reward Classifer for know if the task succeeded or not (We can also do this manually using keyboard)
+1. New scripts to replace isaac sim environment with real robot 
+2. Add leader arm teleop (currently it is keyboard)
+2. Reward Classifer to know if the task succeeded or not (We can also do this manually using keyboard)
 3. Add End Affector workspace bounds to make sure robot doesnt collide with anything
 4. Readd the max_ee_step_m check to 0.05m in the processor
 5. Set up Cameras, crop images in the environment processors
