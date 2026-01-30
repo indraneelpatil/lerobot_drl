@@ -19,7 +19,7 @@
         "disable_artifact": true
     },
     "dataset": {
-        "repo_id": "indraneelpatil/isaac_sim_pick_lift_sim5",
+        "repo_id": "indraneelpatil/isaac_sim_pick_lift_sim7",
         "use_imagenet_stats": false
     },
     "env": {
