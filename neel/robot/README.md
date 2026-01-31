@@ -9,3 +9,4 @@
 6. Consider adding extra observations like velocities
 7. Tune hyperparameters
 8. Consider reusing data from simulation
+9. Write an inference script which loads and runs the trained model
