@@ -127,7 +127,7 @@ def control_loop(
     print(f"Starting real robot control loop at {cfg.env.fps} FPS")
     print("Controls:")
     print("- Use leader arm for intervention")
-    print("- When not intervening, robot will stay still")
+    print("- When not intervening, leader arm will follow follower arm")
     print("- Press 's' for success, 'f' for failure, 'r' to rerecord")
     print("- Press Ctrl+C to exit")
 
@@ -225,9 +225,13 @@ def control_loop(
                 for k, v in transition[TransitionKey.OBSERVATION].items()
             }
 
-            action = transition[TransitionKey.ACTION].squeeze(0).cpu() if isinstance(transition[TransitionKey.ACTION], torch.Tensor) else transition[TransitionKey.ACTION]
-            reward = transition[TransitionKey.REWARD].squeeze(0).cpu() if isinstance(transition[TransitionKey.REWARD], torch.Tensor) else np.array([transition[TransitionKey.REWARD]], dtype=np.float32)
-            done = torch.tensor([terminated or truncated], dtype=torch.bool)
+            # Use teleop_action if available, otherwise use the action from the transition
+            action_to_record = transition[TransitionKey.COMPLEMENTARY_DATA].get(
+                "teleop_action", transition[TransitionKey.ACTION]
+            )
+            action = action_to_record.squeeze(0).cpu() if isinstance(action_to_record, torch.Tensor) else action_to_record.astype(np.float32)
+            reward = transition[TransitionKey.REWARD].cpu() if isinstance(transition[TransitionKey.REWARD], torch.Tensor) else np.array([transition[TransitionKey.REWARD]], dtype=np.float32)
+            done = np.array([terminated or truncated], dtype=bool)
 
             # Add to dataset
             dataset_frame = {
@@ -245,7 +249,9 @@ def control_loop(
 
             if use_gripper and "discrete_penalty" in transition[TransitionKey.COMPLEMENTARY_DATA]:
                 discrete_penalty = transition[TransitionKey.COMPLEMENTARY_DATA]["discrete_penalty"]
-                discrete_penalty = discrete_penalty.squeeze(0).cpu() if isinstance(discrete_penalty, torch.Tensor) else discrete_penalty
+                if isinstance(discrete_penalty, torch.Tensor):
+                    discrete_penalty = discrete_penalty.squeeze(0).cpu().numpy()
+                discrete_penalty = np.array([discrete_penalty], dtype=np.float32) if np.isscalar(discrete_penalty) else np.array(discrete_penalty, dtype=np.float32)
                 dataset_frame["complementary_info.discrete_penalty"] = discrete_penalty
 
             dataset.add_frame(dataset_frame)
@@ -285,6 +291,7 @@ def control_loop(
     # Push to HuggingFace Hub if configured
     if cfg.mode == "record" and cfg.dataset.push_to_hub:
         logging.info("Pushing dataset to HuggingFace Hub...")
+        dataset.finalize()
         dataset.push_to_hub()
         logging.info("Dataset pushed successfully")
 
