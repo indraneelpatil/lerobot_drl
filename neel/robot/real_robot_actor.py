@@ -60,14 +60,14 @@ from lerobot.utils.utils import (
     init_logging,
 )
 
-from .isaac_gym_utils import (
+from neel.simulation.isaac_gym_utils import (
     create_transition,
     make_processors,
     make_robot_env,
     step_env_and_process_transition,
 )
 
-from .actor import (
+from neel.simulation.actor import (
     establish_learner_connection,
     learner_service_client,
     receive_policy,

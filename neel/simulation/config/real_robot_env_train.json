@@ -6,10 +6,10 @@
     "num_workers": 4,
     "batch_size": 256,
     "steps": 100000,
-    "eval_freq": 20000,
+    "eval_freq": 1000,
     "log_freq": 1,
     "save_checkpoint": true,
-    "save_freq": 20000,
+    "save_freq": 2000,
     "use_policy_training_preset": true,
     "optimizer": null,
     "scheduler": null,
@@ -73,9 +73,9 @@
                     "max": [0.35, 0.06, 0.2]
                 },
                 "end_effector_step_sizes": {
-                    "x": 0.2,
-                    "y": 0.2,
-                    "z": 0.2
+                    "x": 0.02,
+                    "y": 0.02,
+                    "z": 0.02
                 }
             },
             "image_preprocessing": {
