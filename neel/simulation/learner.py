@@ -116,7 +116,7 @@ def train(cfg: TrainRLServerPipelineConfig, job_name: str | None = None):
     # Initialize logging with explicit log file
     init_logging(log_file=log_file, display_pid=display_pid)
     logging.info(f"Learner logging initialized, writing to {log_file}")
-    logging.info(pformat(cfg.to_dict()))
+    logging.info(format(cfg.to_dict()))
 
     # Setup WandB logging if enabled
     if cfg.wandb.enable and cfg.wandb.project:
@@ -393,8 +393,17 @@ def add_actor_information_and_train(
         )
 
         # Wait until the replay buffer has enough samples to start training
-        if len(replay_buffer) < online_step_before_learning:
+        buffer_size = len(replay_buffer)
+        if buffer_size < online_step_before_learning:
+            if buffer_size % 10 == 0 or buffer_size == 0:  # Log every 10 samples to avoid spam
+                logging.info(f"[LEARNER] Waiting for replay buffer to fill: {buffer_size}/{online_step_before_learning}")
             continue
+        elif buffer_size == online_step_before_learning:
+            logging.info(f"[LEARNER] Replay buffer filled! Starting training with {buffer_size} samples")
+
+        # Log that we're entering training iteration
+        if optimization_step % 100 == 0:  # Log every 100 steps to avoid spam
+            logging.info(f"[LEARNER] Training iteration: optimization_step={optimization_step}, buffer_size={len(replay_buffer)}")
 
         if online_iterator is None:
             online_iterator = replay_buffer.get_iterator(
@@ -643,7 +652,7 @@ def make_optimizers_and_scheduler(cfg: TrainRLServerPipelineConfig, policy: nn.M
     Initialize Adam optimizers for actor, critic and temperature
     
     """
-     optimizer_actor = torch.optim.Adam(
+    optimizer_actor = torch.optim.Adam(
         params=[
             p
             for n, p in policy.actor.named_parameters()
@@ -764,6 +773,10 @@ def process_transitions(
         dataset_repo_id: Repository ID for dataset
         shutdown_event: Event to signal shutdown
     """
+    queue_size_before = transition_queue.qsize()
+    transitions_added = 0
+    transitions_skipped = 0
+    
     while not transition_queue.empty() and not shutdown_event.is_set():
         transition_list = transition_queue.get()
         transition_list = bytes_to_transitions(buffer=transition_list)
@@ -778,9 +791,14 @@ def process_transitions(
                 next_state=transition["next_state"],
             ):
                 logging.warning("[LEARNER] NaN detected in transition, skipping")
+                transitions_skipped += 1
                 continue
 
             replay_buffer.add(**transition)
+            transitions_added += 1
+    
+    if queue_size_before > 0 or transitions_added > 0 or transitions_skipped > 0:
+        logging.info(f"[LEARNER] Processed transitions: queue_size={queue_size_before}, added={transitions_added}, skipped={transitions_skipped}, buffer_size={len(replay_buffer)}")
 
             # Add to offline buffer if it's an intervention
             if dataset_repo_id is not None and transition.get("complementary_info", {}).get(

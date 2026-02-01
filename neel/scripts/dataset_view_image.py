@@ -6,10 +6,10 @@ from datasets import load_dataset
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 import matplotlib.pyplot as plt
 
-#ds = LeRobotDataset(repo_id="indraneelpatil/isaac_sim_pick_lift_sim4")
-ds = LeRobotDataset("/home/neel/.cache/huggingface/lerobot/indraneelpatil/isaac_sim_pick_lift_sim5")
+ds = LeRobotDataset(repo_id="indraneelpatil/franka_sim_pick_lift_sim4")
+# ds = LeRobotDataset("/home/neel/.cache/huggingface/lerobot/indraneelpatil/isaac_sim_pick_lift_sim7")
 
-sample = ds[120]
+sample = ds[300]
 
 print(sample)
 
