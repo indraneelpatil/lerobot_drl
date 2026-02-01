@@ -6,7 +6,16 @@
         "robot": {
             "type": "so101_follower",
             "id": "singles_inferno_dex_follower",
-            "port": "/dev/ttyACM0"
+            "port": "/dev/ttyACM0",
+            "cameras": {
+                "top": {
+                    "type": "opencv",
+                    "index_or_path": 0,
+                    "height": 480,
+                    "width": 640,
+                    "fps": 30
+                }
+            }
         },
         "teleop": {
             "type": "keyboard_ee",
@@ -15,7 +24,7 @@
         "processor": {
             "control_mode": "keyboard",
             "observation": {
-                "display_cameras": false,
+                "display_cameras": true,
                 "add_joint_velocity_to_observation": false
             },
             "image_preprocessing": null,

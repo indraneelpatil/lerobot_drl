@@ -13,7 +13,9 @@ from lerobot.teleoperators import (
     make_teleoperator_from_config,
     so_leader,  # noqa: F401
 )
+from lerobot.cameras import opencv  # noqa: F401
 
+import lerobot.teleoperators.so_leader.so_leader
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -77,6 +79,8 @@ leader_torque_disabled = False
 
 def mirror_follower_if_in_auto(teleop_device: Teleoperator | None, transition: EnvTransition, env: gym.Env):
     global leader_torque_disabled
+    if not isinstance(teleop_device, lerobot.teleoperators.so_leader.so_leader.SOLeader):
+        return
     # Mirror follower arm to leader arm when teleop is off
     if teleop_device is not None and teleop_device.is_connected:
         info = transition.get(TransitionKey.INFO, {})

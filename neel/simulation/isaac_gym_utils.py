@@ -381,7 +381,7 @@ class RobotEnv(gym.Env):
                 image = camera.read()
                 if image is not None:
                     images[camera_name] = image
-                    obs[f"pixels.{camera_name}"] = image
+                    # obs[f"pixels.{camera_name}"] = image
 
                     # Display if requested
                     if self.display_cameras:
@@ -453,6 +453,8 @@ class RobotEnv(gym.Env):
 
         # Get new observation
         obs = self._get_observation()
+
+
 
         # Calculate reward (will be overridden by reward classifier or manual annotation)
         reward = 0.0
