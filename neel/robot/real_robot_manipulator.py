@@ -181,7 +181,7 @@ def control_loop(
             }
 
             action = transition[TransitionKey.ACTION].squeeze(0).cpu() if isinstance(transition[TransitionKey.ACTION], torch.Tensor) else transition[TransitionKey.ACTION]
-            reward = transition[TransitionKey.REWARD].squeeze(0).cpu() if isinstance(transition[TransitionKey.REWARD], torch.Tensor) else transition[TransitionKey.REWARD]
+            reward = transition[TransitionKey.REWARD].squeeze(0).cpu() if isinstance(transition[TransitionKey.REWARD], torch.Tensor) else np.array([transition[TransitionKey.REWARD]], dtype=np.float32)
             done = torch.tensor([terminated or truncated], dtype=torch.bool)
 
             # Add to dataset
@@ -190,9 +190,14 @@ def control_loop(
                 ACTION: action,
                 REWARD: reward,
                 DONE: done,
+                "task": cfg.dataset.task,
             }
 
             # Add discrete penalty if using gripper
+            if "discrete_penalty" not in transition[TransitionKey.COMPLEMENTARY_DATA]:
+                # TODO: Fix this please
+                transition[TransitionKey.COMPLEMENTARY_DATA]["discrete_penalty"] = np.array([0.0], dtype=np.float32)
+
             if use_gripper and "discrete_penalty" in transition[TransitionKey.COMPLEMENTARY_DATA]:
                 discrete_penalty = transition[TransitionKey.COMPLEMENTARY_DATA]["discrete_penalty"]
                 discrete_penalty = discrete_penalty.squeeze(0).cpu() if isinstance(discrete_penalty, torch.Tensor) else discrete_penalty
