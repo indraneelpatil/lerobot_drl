@@ -55,6 +55,7 @@ from lerobot.teleoperators import (
     make_teleoperator_from_config,
     so101_leader,  # noqa: F401
 )
+from lerobot.teleoperators.utils import TeleopEvents
 from lerobot.utils.constants import ACTION, DONE, OBS_IMAGES, OBS_STATE, REWARD
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
@@ -100,6 +101,7 @@ class GymManipulatorConfig:
 def control_loop(env: gym.Env,
                  env_processor: DataProcessorPipeline[EnvTransition, EnvTransition],
                  action_processor: DataProcessorPipeline[EnvTransition, EnvTransition],
+                 teleop_device: Teleoperator | None,
                 cfg: GymManipulatorConfig):
     """ Main control loop for environment interaction"""
 
@@ -108,7 +110,7 @@ def control_loop(env: gym.Env,
     print(f"Starting control loop at {cfg.env.fps} FPS")
     print("Controls:")
     print("- Use teleop device for intervenion")
-    print("- When not intervening, robot will stay still")
+    print("- When not intervening, leader arm will follow follower arm")
     print("- Press Ctrl+C to exit")
 
     # Reset environment
@@ -194,6 +196,32 @@ def control_loop(env: gym.Env,
         terminated = terminated.squeeze(0).cpu() if isinstance(terminated, torch.Tensor) else terminated
         truncated = truncated.squeeze(0).cpu() if isinstance(truncated, torch.Tensor) else truncated
 
+        # Mirror follower arm to leader arm when teleop is off
+        if teleop_device is not None and teleop_device.is_connected:
+            info = transition.get(TransitionKey.INFO, {})
+            is_intervention = info.get(TeleopEvents.IS_INTERVENTION, False)
+            
+            # If teleop is off (no intervention), mirror follower to leader
+            if not is_intervention:
+                try:
+                    # Get follower arm joint positions from environment
+                    if hasattr(env, "get_raw_joint_positions"):
+                        follower_joint_positions = env.get_raw_joint_positions()
+                        
+                        # Convert from {"shoulder_pan.pos": value, ...} to {"shoulder_pan": value, ...}
+                        # for the leader arm bus.sync_write format
+                        leader_goal_positions = {}
+                        for joint_name in hc_joint_names:
+                            joint_key = f"{joint_name}.pos"
+                            if joint_key in follower_joint_positions:
+                                leader_goal_positions[joint_name] = follower_joint_positions[joint_key]
+                        
+                        # Send positions to leader arm
+                        if leader_goal_positions and hasattr(teleop_device, "bus"):
+                            teleop_device.bus.sync_write("Goal_Position", leader_goal_positions)
+                except Exception as e:
+                    logging.debug(f"Error mirroring follower to leader: {e}")
+
         if cfg.mode == "record":
             observations = {
                 k: v.squeeze(0).cpu() 
@@ -267,7 +295,7 @@ def main(cfg: GymManipulatorConfig) -> None:
     print("Environment processor:", env_processor)
     print("Action processor:", action_processor)
 
-    control_loop(env, env_processor, action_processor, cfg)
+    control_loop(env, env_processor, action_processor, teleop_device, cfg)
 
     # Close the simulator
     env.close()
