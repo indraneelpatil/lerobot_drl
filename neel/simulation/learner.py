@@ -116,7 +116,7 @@ def train(cfg: TrainRLServerPipelineConfig, job_name: str | None = None):
     # Initialize logging with explicit log file
     init_logging(log_file=log_file, display_pid=display_pid)
     logging.info(f"Learner logging initialized, writing to {log_file}")
-    logging.info(pformat(cfg.to_dict()))
+    logging.info(format(cfg.to_dict()))
 
     # Setup WandB logging if enabled
     if cfg.wandb.enable and cfg.wandb.project:
@@ -643,7 +643,7 @@ def make_optimizers_and_scheduler(cfg: TrainRLServerPipelineConfig, policy: nn.M
     Initialize Adam optimizers for actor, critic and temperature
     
     """
-     optimizer_actor = torch.optim.Adam(
+    optimizer_actor = torch.optim.Adam(
         params=[
             p
             for n, p in policy.actor.named_parameters()
