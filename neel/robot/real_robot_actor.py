@@ -4,6 +4,9 @@ Created by Indraneel on 02/01/2025
 
 Real robot actor process
 
+
+python -m robot.real_robot_actor --config_path simulation/config/real_robot_env_train.json
+
 """
 
 from lerobot.teleoperators.teleoperator import Teleoperator
