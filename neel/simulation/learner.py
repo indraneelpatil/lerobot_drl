@@ -24,6 +24,7 @@ from torch.multiprocessing import Queue
 from concurrent.futures import ThreadPoolExecutor
 from torch.optim.optimizer import Optimizer
 
+from lerobot.cameras import opencv  # noqa: F401
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.factory import make_dataset
 from lerobot.configs.train import TrainRLServerPipelineConfig
@@ -66,8 +67,10 @@ from lerobot.teleoperators import (
     gamepad,  # noqa: F401
     keyboard,  # noqa: F401
     make_teleoperator_from_config,
-    so101_leader,  # noqa: F401
+    so_leader,  # noqa: F401
 )
+from lerobot.robots import so_follower  # noqa: F401
+import lerobot.teleoperators.so_leader.so_leader
 
 from .learner_service import MAX_WORKERS, SHUTDOWN_TIMEOUT, LearnerService
 
