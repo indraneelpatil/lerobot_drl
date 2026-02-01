@@ -5,7 +5,7 @@
         "fps": 10,
         "robot": null,
         "teleop": {
-            "type": "so101_leader_with_intervention",
+            "type": "so101_leader_with_interventions",
             "id": "singles_inferno_dex_keyboard"
         },
         "processor": {

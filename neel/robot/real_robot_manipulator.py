@@ -11,6 +11,7 @@ from lerobot.teleoperators import (
     gamepad,  # noqa: F401
     keyboard,  # noqa: F401
     make_teleoperator_from_config,
+    so_leader,  # noqa: F401
 )
 
 import logging
