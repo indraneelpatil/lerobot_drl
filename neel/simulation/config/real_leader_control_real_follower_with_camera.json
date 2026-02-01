@@ -10,14 +10,14 @@
             "cameras": {
                 "top": {
                     "type": "opencv",
-                    "index_or_path": 4,
+                    "index_or_path": 6,
                     "height": 480,
                     "width": 640,
                     "fps": 30
                 },
                 "wrist": {
                     "type": "opencv",
-                    "index_or_path": 6,
+                    "index_or_path": 4,
                     "height": 480,
                     "width": 640,
                     "fps": 30
@@ -32,7 +32,7 @@
         "processor": {
             "control_mode": "keyboard",
             "observation": {
-                "display_cameras": false,
+                "display_cameras": true,
                 "add_joint_velocity_to_observation": false
             },
             "image_preprocessing": null,
@@ -44,29 +44,29 @@
                 "fixed_reset_joint_positions": [-7.14, 11, 95.48, -94.95, -56.44, 2.02],
                 "reset_time_s": 2.0,
                 "control_time_s": 300.0,
-                "terminate_on_success": false
+                "terminate_on_success": true
             },
             "inverse_kinematics": {
                 "urdf_path": "assets/robots/so101.urdf",
                 "target_frame_name": "gripper_frame_link",
                 "end_effector_bounds": {
-                    "min": [0.195, -0.065, 0.005],
-                    "max": [0.25, 0.065, 0.1]
+                    "min": [0.16, -0.06, 0.001],
+                    "max": [0.3, 0.06, 0.11]
                 },
                 "end_effector_step_sizes": {
-                    "x": 0.025,
-                    "y": 0.025,
-                    "z": 0.025
+                    "x": 0.02,
+                    "y": 0.02,
+                    "z": 0.02
                 }
             },
             "max_gripper_pos": 30
         }
     },
     "dataset": {
-        "repo_id": "brucekimrok/real_robot_plug_charger",
+        "repo_id": "brucekimrok/real_robot_plug_charger_1_episode_ee_boundary",
         "root": null,
-        "task": "Real-SO101-Plug-Charger-5-episodes-v0",
-        "num_episodes_to_record": 5er,
+        "task": "Real-SO101-Plug-Charger-5-episodes-v1",
+        "num_episodes_to_record": 1,
         "replay_episode": null,
         "push_to_hub": true
     },
