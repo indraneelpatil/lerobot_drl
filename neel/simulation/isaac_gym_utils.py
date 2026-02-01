@@ -659,11 +659,22 @@ def make_processors(
     if cfg.name == "real_robot":
         action_pipeline_steps = [
             AddTeleopActionAsComplimentaryDataStep(teleop_device=teleop_device),
-            AddTeleopEventsAsInfoStep(teleop_device=teleop_device),
+            AddTeleopEventsAsInfoStep(teleop_device=teleop_device)]
+
+        # Convert teleop_action from joint space to delta x, y, z if kinematics solver is available
+        if kinematics_solver is not None:
+            action_pipeline_steps.append(
+                TeleopConvertJointToDeltaStep(
+                    kinematics=kinematics_solver,
+                    motor_names=joint_names,
+                    use_gripper=cfg.processor.gripper.use_gripper if cfg.processor.gripper is not None else False,
+                )
+            )
+        action_pipeline_steps.append(
             InterventionActionProcessorStep(
                 use_gripper=cfg.processor.gripper.use_gripper if cfg.processor.gripper is not None else False,
                 terminate_on_success=terminate_on_success),
-        ]
+        )
 
         # Replace InverseKinematicsProcessor with new kinematic processors
         if cfg.processor.inverse_kinematics is not None and kinematics_solver is not None:

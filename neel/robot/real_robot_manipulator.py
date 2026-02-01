@@ -33,6 +33,7 @@ from lerobot.processor import (
 from lerobot.utils.robot_utils import busy_wait
 from lerobot.utils.constants import ACTION, DONE, OBS_IMAGES, OBS_STATE, REWARD
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.teleoperators.utils import TeleopEvents
 
 # Import from isaac_gym_utils (which now has real_robot support)
 import sys
@@ -72,11 +73,49 @@ class GymManipulatorConfig:
     device: str = "cpu"
 
 
+leader_torque_disabled = False
+
+def mirror_follower_if_in_auto(teleop_device: Teleoperator | None, transition: EnvTransition, env: gym.Env):
+    global leader_torque_disabled
+    # Mirror follower arm to leader arm when teleop is off
+    if teleop_device is not None and teleop_device.is_connected:
+        info = transition.get(TransitionKey.INFO, {})
+        is_intervention = info.get(TeleopEvents.IS_INTERVENTION, False)
+        
+        # If teleop is off (no intervention), mirror follower to leader
+        if not is_intervention:
+            try:
+                # Get follower arm joint positions from environment
+                if hasattr(env, "get_raw_joint_positions"):
+                    follower_joint_positions = env.get_raw_joint_positions()
+                    
+                    # Convert from {"shoulder_pan.pos": value, ...} to {"shoulder_pan": value, ...}
+                    # for the leader arm bus.sync_write format
+                    leader_goal_positions = {}
+                    for joint_name in hc_joint_names:
+                        joint_key = f"{joint_name}.pos"
+                        if joint_key in follower_joint_positions:
+                            leader_goal_positions[joint_name] = follower_joint_positions[joint_key]
+                    
+                    # Send positions to leader arm
+                    if leader_goal_positions and hasattr(teleop_device, "bus"):
+                        teleop_device.bus.sync_write("Goal_Position", leader_goal_positions)
+                        print(f"\n\t Mirroring follower to leader: {leader_goal_positions}")
+                        leader_torque_disabled = False
+            except Exception as e:
+                logging.debug(f"Error mirroring follower to leader: {e}")
+        else:
+            # Allow leader to move freely when in intervention mode
+            if not leader_torque_disabled:
+                leader_torque_disabled = True
+                teleop_device.bus.disable_torque()
+
 def control_loop(
     env: gym.Env,
     env_processor: DataProcessorPipeline[EnvTransition, EnvTransition],
     action_processor: DataProcessorPipeline[EnvTransition, EnvTransition],
-    cfg: GymManipulatorConfig
+    cfg: GymManipulatorConfig,
+    teleop_device: Teleoperator | None = None,
 ):
     """Main control loop for real robot interaction."""
 
@@ -175,6 +214,8 @@ def control_loop(
         terminated = terminated.squeeze(0).cpu() if isinstance(terminated, torch.Tensor) else terminated
         truncated = truncated.squeeze(0).cpu() if isinstance(truncated, torch.Tensor) else truncated
         
+        mirror_follower_if_in_auto(teleop_device, transition, env)
+
         if cfg.mode == "record":
             observations = {
                 k: v.squeeze(0).cpu() if isinstance(v, torch.Tensor) else v
@@ -271,7 +312,7 @@ def main(cfg: GymManipulatorConfig):
 
     try:
         # Run control loop
-        control_loop(env, env_processor, action_processor, cfg)
+        control_loop(env, env_processor, action_processor, cfg, teleop_device)
     except KeyboardInterrupt:
         logging.info("Interrupted by user")
     finally:
