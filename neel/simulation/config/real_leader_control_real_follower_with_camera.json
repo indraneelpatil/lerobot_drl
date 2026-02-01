@@ -25,13 +25,14 @@
             }
         },
         "teleop": {
-            "type": "keyboard_ee",
-            "id": "keyboard_control_mvp"
+            "type": "so101_leader_with_interventions",
+            "id": "singles_inferno_dex_leader",
+            "port": "/dev/ttyACM1"
         },
         "processor": {
             "control_mode": "keyboard",
             "observation": {
-                "display_cameras": true,
+                "display_cameras": false,
                 "add_joint_velocity_to_observation": false
             },
             "image_preprocessing": null,
@@ -40,7 +41,7 @@
                 "gripper_penalty": 0.0
             },
             "reset": {
-                "fixed_reset_joint_positions": [0.0, 0.0, 0.0, 90.0, 0.0, 30.0],
+                "fixed_reset_joint_positions": [-7.14, 11, 95.48, -94.95, -56.44, 2.02],
                 "reset_time_s": 2.0,
                 "control_time_s": 300.0,
                 "terminate_on_success": false
@@ -62,10 +63,10 @@
         }
     },
     "dataset": {
-        "repo_id": "indraneelpatil/isaac_sim_pick_lift_sim7",
+        "repo_id": "brucekimrok/real_robot_plug_charger",
         "root": null,
-        "task": "LeIsaac-SO101-LiftCube-v0",
-        "num_episodes_to_record": 5,
+        "task": "Real-SO101-Plug-Charger-5-episodes-v0",
+        "num_episodes_to_record": 5er,
         "replay_episode": null,
         "push_to_hub": true
     },

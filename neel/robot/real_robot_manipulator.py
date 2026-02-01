@@ -104,7 +104,6 @@ def mirror_follower_if_in_auto(teleop_device: Teleoperator | None, transition: E
                     # Send positions to leader arm
                     if leader_goal_positions and hasattr(teleop_device, "bus"):
                         teleop_device.bus.sync_write("Goal_Position", leader_goal_positions)
-                        print(f"\n\t Mirroring follower to leader: {leader_goal_positions}")
                         leader_torque_disabled = False
             except Exception as e:
                 logging.debug(f"Error mirroring follower to leader: {e}")
