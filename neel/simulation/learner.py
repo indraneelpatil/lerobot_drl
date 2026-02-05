@@ -764,9 +764,6 @@ def process_transitions(
         dataset_repo_id: Repository ID for dataset
         shutdown_event: Event to signal shutdown
     """
-    queue_size_before = transition_queue.qsize()
-    transitions_added = 0
-    transitions_skipped = 0
     
     while not transition_queue.empty() and not shutdown_event.is_set():
         transition_list = transition_queue.get()
@@ -782,14 +779,9 @@ def process_transitions(
                 next_state=transition["next_state"],
             ):
                 logging.warning("[LEARNER] NaN detected in transition, skipping")
-                transitions_skipped += 1
                 continue
 
-            replay_buffer.add(**transition)
-            transitions_added += 1
-    
-    if queue_size_before > 0 or transitions_added > 0 or transitions_skipped > 0:
-        logging.info(f"[LEARNER] Processed transitions: queue_size={queue_size_before}, added={transitions_added}, skipped={transitions_skipped}, buffer_size={len(replay_buffer)}")
+            replay_buffer.add(**transition)    
 
             # Add to offline buffer if it's an intervention
             if dataset_repo_id is not None and transition.get("complementary_info", {}).get(
