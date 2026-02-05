@@ -61,7 +61,8 @@ def use_threads(cfg: TrainRLServerPipelineConfig) -> bool:
 
 @parser.wrap()
 def actor_cli(cfg: TrainRLServerPipelineConfig):
-    cfg.validate()
+    # Note: Don't call cfg.validate() here - the learner handles validation
+    # and creates the output directory. The actor just needs to use it.
     display_pid = False
     if not use_threads(cfg):
         import torch.multiprocessing as mp

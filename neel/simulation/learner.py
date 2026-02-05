@@ -73,13 +73,15 @@ from .learner_service import MAX_WORKERS, SHUTDOWN_TIMEOUT, LearnerService
 def train_cli(cfg: TrainRLServerPipelineConfig):
     if not use_threads(cfg):
         import torch.multiprocessing as mp
+
         mp.set_start_method("spawn")
 
-    # Use the job name from the config
+    # Use the job_name from the config
     train(
         cfg,
         job_name=cfg.job_name,
     )
+
     logging.info("[LEARNER] train_cli finished")
 
 def use_threads(cfg: TrainRLServerPipelineConfig) -> bool:
@@ -87,16 +89,21 @@ def use_threads(cfg: TrainRLServerPipelineConfig) -> bool:
 
 def train(cfg: TrainRLServerPipelineConfig, job_name: str | None = None):
     """
-    Main training function that initialized and runs the training process
+    Main training function that initializes and runs the training process.
+
+    Args:
+        cfg (TrainRLServerPipelineConfig): The training configuration
+        job_name (str | None, optional): Job name for logging. Defaults to None.
     """
+
     cfg.validate()
 
     if job_name is None:
         job_name = cfg.job_name
 
     if job_name is None:
-        raise ValueError("Job name must be specified either in config or as parameter")
-    
+        raise ValueError("Job name must be specified either in config or as a parameter")
+
     display_pid = False
     if not use_threads(cfg):
         display_pid = True
@@ -109,6 +116,7 @@ def train(cfg: TrainRLServerPipelineConfig, job_name: str | None = None):
     # Initialize logging with explicit log file
     init_logging(log_file=log_file, display_pid=display_pid)
     logging.info(f"Learner logging initialized, writing to {log_file}")
+    logging.info(format(cfg.to_dict()))
 
     # Setup WandB logging if enabled
     if cfg.wandb.enable and cfg.wandb.project:
@@ -117,8 +125,8 @@ def train(cfg: TrainRLServerPipelineConfig, job_name: str | None = None):
         wandb_logger = WandBLogger(cfg)
     else:
         wandb_logger = None
-        logging.info(colored("Logs will be saved locally", "yellow", attrs=["bold"]))
-    
+        logging.info(colored("Logs will be saved locally.", "yellow", attrs=["bold"]))
+
     # Handle resume logic
     cfg = handle_resume_logic(cfg)
 
@@ -133,16 +141,22 @@ def train(cfg: TrainRLServerPipelineConfig, job_name: str | None = None):
     start_learner_threads(
         cfg=cfg,
         wandb_logger=wandb_logger,
-        shutdown_event=shutdown_event
+        shutdown_event=shutdown_event,
     )
 
+
 def start_learner_threads(
-        cfg: TrainRLServerPipelineConfig,
-        wandb_logger: WandBLogger | None,
-        shutdown_event: any, # Event
+    cfg: TrainRLServerPipelineConfig,
+    wandb_logger: WandBLogger | None,
+    shutdown_event: any,  # Event,
 ) -> None:
     """
-    Start the learner threads for training
+    Start the learner threads for training.
+
+    Args:
+        cfg (TrainRLServerPipelineConfig): Training configuration
+        wandb_logger (WandBLogger | None): Logger for metrics
+        shutdown_event: Event to signal shutdown
     """
     # Create multiprocessing queues
     transition_queue = Queue()
@@ -163,13 +177,13 @@ def start_learner_threads(
     communication_process = concurrency_entity(
         target=start_learner,
         args=(
-              parameters_queue,
-              transition_queue,
-              interaction_message_queue,
-              shutdown_event,
-              cfg,
-            ),
-            daemon=True
+            parameters_queue,
+            transition_queue,
+            interaction_message_queue,
+            shutdown_event,
+            cfg,
+        ),
+        daemon=True,
     )
     communication_process.start()
 
@@ -179,7 +193,7 @@ def start_learner_threads(
         shutdown_event=shutdown_event,
         transition_queue=transition_queue,
         interaction_message_queue=interaction_message_queue,
-        parameters_queue=parameters_queue
+        parameters_queue=parameters_queue,
     )
     logging.info("[LEARNER] Training process stopped")
 
@@ -190,7 +204,7 @@ def start_learner_threads(
 
     communication_process.join()
     logging.info("[LEARNER] Communication process joined")
-    
+
     logging.info("[LEARNER] join queues")
     transition_queue.cancel_join_thread()
     interaction_message_queue.cancel_join_thread()
@@ -202,11 +216,20 @@ def start_learner(
     parameters_queue: Queue,
     transition_queue: Queue,
     interaction_message_queue: Queue,
-    shutdown_event: any, # Event
+    shutdown_event: any,  # Event,
     cfg: TrainRLServerPipelineConfig,
 ):
     """
-    Start the learner server for training
+    Start the learner server for training.
+    It will receive transitions and interaction messages from the actor server,
+    and send policy parameters to the actor server.
+
+    Args:
+        parameters_queue: Queue for sending policy parameters to the actor
+        transition_queue: Queue for receiving transitions from the actor
+        interaction_message_queue: Queue for receiving interaction messages from the actor
+        shutdown_event: Event to signal shutdown
+        cfg: Training configuration
     """
     if not use_threads(cfg):
         # Create a process-specific log file
@@ -220,8 +243,10 @@ def start_learner(
 
         # Setup process handlers to handle shutdown signal
         # But use shutdown event from the main process
+        # Return back for MP
+        # TODO: Check if its useful
         _ = ProcessSignalHandler(False, display_pid=True)
-    
+
     service = LearnerService(
         shutdown_event=shutdown_event,
         parameters_queue=parameters_queue,
@@ -235,13 +260,13 @@ def start_learner(
         ThreadPoolExecutor(max_workers=MAX_WORKERS),
         options=[
             ("grpc.max_receive_message_length", MAX_MESSAGE_SIZE),
-            ("grpc.max_send_message_length", MAX_MESSAGE_SIZE)
-        ]
+            ("grpc.max_send_message_length", MAX_MESSAGE_SIZE),
+        ],
     )
 
     services_pb2_grpc.add_LearnerServiceServicer_to_server(
         service,
-        server
+        server,
     )
 
     host = cfg.policy.actor_learner_config.learner_host
@@ -254,23 +279,25 @@ def start_learner(
     shutdown_event.wait()
     logging.info("[LEARNER] Stopping gRPC server...")
     server.stop(SHUTDOWN_TIMEOUT)
+    logging.info("[LEARNER] gRPC server stopped")
+
 
 
 def add_actor_information_and_train(
     cfg: TrainRLServerPipelineConfig,
     wandb_logger: WandBLogger | None,
-    shutdown_event: any, # Event
+    shutdown_event: any,  # Event,
     transition_queue: Queue,
     interaction_message_queue: Queue,
-    parameters_queue: Queue 
+    parameters_queue: Queue,
 ):
     """
     Fill replay buffer from actor, sample batches from buffers and perform
     critic updates, also update actor and other optimizers, log training
     statistics
     """
-    # Extract all configuration variables at the beginning, it improves the 
-    # speed performance of 7%
+    # Extract all configuration variables at the beginning, it improve the speed performance
+    # of 7%
     device = get_safe_torch_device(try_device=cfg.policy.device, log=True)
     storage_device = get_safe_torch_device(try_device=cfg.policy.storage_device)
     clip_grad_norm_value = cfg.policy.grad_clip_norm
@@ -297,7 +324,7 @@ def add_actor_information_and_train(
 
     policy: SACPolicy = make_policy(
         cfg=cfg.policy,
-        env_cfg=cfg.env
+        env_cfg=cfg.env,
     )
 
     assert isinstance(policy, nn.Module)
@@ -323,9 +350,9 @@ def add_actor_information_and_train(
         offline_replay_buffer = initialize_offline_replay_buffer(
             cfg=cfg,
             device=device,
-            storage_device=storage_device
+            storage_device=storage_device,
         )
-        batch_size: int = batch_size // 2 # We will sample from both the replay buffer
+        batch_size: int = batch_size // 2  # We will sample from both replay buffer
 
     logging.info("Starting learner thread")
     interaction_message = None
@@ -335,7 +362,7 @@ def add_actor_information_and_train(
     dataset_repo_id = None
     if cfg.dataset is not None:
         dataset_repo_id = cfg.dataset.repo_id
-    
+
     # Initialize iterators
     online_iterator = None
     offline_iterator = None
@@ -346,7 +373,7 @@ def add_actor_information_and_train(
         if shutdown_event is not None and shutdown_event.is_set():
             logging.info("[LEARNER] Shutdown signal received. Exiting...")
             break
-    
+
         # Process all available transitions to the replay buffer, send by the actor server
         process_transitions(
             transition_queue=transition_queue,
@@ -373,15 +400,13 @@ def add_actor_information_and_train(
             online_iterator = replay_buffer.get_iterator(
                 batch_size=batch_size, async_prefetch=async_prefetch, queue_size=2
             )
-        
+
         if offline_replay_buffer is not None and offline_iterator is None:
             offline_iterator = offline_replay_buffer.get_iterator(
                 batch_size=batch_size, async_prefetch=async_prefetch, queue_size=2
             )
-        
+
         time_for_one_optimization_step = time.time()
-        # UTD ratio: Update to data ratio
-        # Reuse the same data multiple times
         for _ in range(utd_ratio - 1):
             # Sample from the iterators
             batch = next(online_iterator)
@@ -391,7 +416,7 @@ def add_actor_information_and_train(
                 batch = concatenate_batch_transitions(
                     left_batch_transitions=batch, right_batch_transition=batch_offline
                 )
-            
+
             actions = batch[ACTION]
             rewards = batch["reward"]
             observations = batch["state"]
@@ -412,7 +437,7 @@ def add_actor_information_and_train(
                 "done": done,
                 "observation_feature": observation_features,
                 "next_observation_feature": next_observation_features,
-                "complementary_info": batch["complementary_info"]
+                "complementary_info": batch["complementary_info"],
             }
 
             # Use the forward method for critic loss
@@ -440,7 +465,7 @@ def add_actor_information_and_train(
 
             # Update target networks (main and discrete)
             policy.update_target_networks()
-        
+
         # Sample for the last update in the UTD ratio
         batch = next(online_iterator)
 
@@ -462,7 +487,7 @@ def add_actor_information_and_train(
             policy=policy, observations=observations, next_observations=next_observations
         )
 
-        # Create a batch dictionary with all the required elements for the forward method
+        # Create a batch dictionary with all required elements for the forward method
         forward_batch = {
             ACTION: actions,
             "reward": rewards,
@@ -470,7 +495,7 @@ def add_actor_information_and_train(
             "next_state": next_observations,
             "done": done,
             "observation_feature": observation_features,
-            "next_observation_feature": next_observation_features
+            "next_observation_feature": next_observation_features,
         }
 
         critic_output = policy.forward(forward_batch, model="critic")
@@ -533,7 +558,7 @@ def add_actor_information_and_train(
 
                 # Add temperature info to training info
                 training_infos["loss_temperature"] = loss_temperature.item()
-                training_infos["temeperature_grad_norm"] = temp_grad_norm
+                training_infos["temperature_grad_norm"] = temp_grad_norm
                 training_infos["temperature"] = policy.temperature
 
                 # Update temperature
@@ -572,8 +597,9 @@ def add_actor_information_and_train(
                     "Optimization step": optimization_step,
                 },
                 mode="train",
-                custom_step_key="Optimization step"
+                custom_step_key="Optimization step",
             )
+
         optimization_step += 1
         if optimization_step % log_freq == 0:
             logging.info(f"[LEARNER] Number of optimization step: {optimization_step}")
@@ -623,7 +649,7 @@ def make_optimizers_and_scheduler(cfg: TrainRLServerPipelineConfig, policy: nn.M
             for n, p in policy.actor.named_parameters()
             if not policy.config.shared_encoder or not n.startswith("encoder")
         ],
-        lr=cfg.policy.actor_lr
+        lr=cfg.policy.actor_lr,
     )
     optimizer_critic = torch.optim.Adam(params=policy.critic_ensemble.parameters(), lr=cfg.policy.critic_lr)
 
@@ -683,8 +709,7 @@ def initialize_replay_buffer(
             device=device,
             state_keys=cfg.policy.input_features.keys(),
             storage_device=storage_device,
-            optimize_memory=True
-
+            optimize_memory=True,
         )
     
     raise RuntimeError("Resuming not implemented")
@@ -699,16 +724,16 @@ def initialize_offline_replay_buffer(
     Initialize offline replay buffer from a dataset
     """
     if not cfg.resume:
-        logging.info("make dataset offline buffer")
+        logging.info("make_dataset offline buffer")
         offline_dataset = make_dataset(cfg)
     else:
         logging.info("load offline dataset")
         dataset_offline_path = os.path.join(cfg.output_dir, "dataset_offline")
         offline_dataset = LeRobotDataset(
-            repo_id = cfg.dataset.repo_id,
-            root=dataset_offline_path
+            repo_id=cfg.dataset.repo_id,
+            root=dataset_offline_path,
         )
-    
+
     logging.info("Convert to a offline replay buffer")
     offline_replay_buffer = ReplayBuffer.from_lerobot_dataset(
         offline_dataset,
@@ -729,28 +754,36 @@ def process_transitions(
     dataset_repo_id: str | None,
     shutdown_event: any,
 ):
+    """Process all available transitions from the queue.
+
+    Args:
+        transition_queue: Queue for receiving transitions from the actor
+        replay_buffer: Replay buffer to add transitions to
+        offline_replay_buffer: Offline replay buffer to add transitions to
+        device: Device to move transitions to
+        dataset_repo_id: Repository ID for dataset
+        shutdown_event: Event to signal shutdown
     """
-    Process all available transitions from the queue
-    """
+    
     while not transition_queue.empty() and not shutdown_event.is_set():
         transition_list = transition_queue.get()
         transition_list = bytes_to_transitions(buffer=transition_list)
 
         for transition in transition_list:
-            transition = move_transition_to_device(transition=transition,device=device)
+            transition = move_transition_to_device(transition=transition, device=device)
 
             # Skip transitions with NaN values
             if check_nan_in_transition(
                 observations=transition["state"],
                 actions=transition[ACTION],
-                next_state=transition["next_state"]
+                next_state=transition["next_state"],
             ):
                 logging.warning("[LEARNER] NaN detected in transition, skipping")
                 continue
 
-            replay_buffer.add(**transition)
+            replay_buffer.add(**transition)    
 
-            # Add to offline buffer if its an intervention
+            # Add to offline buffer if it's an intervention
             if dataset_repo_id is not None and transition.get("complementary_info", {}).get(
                 TeleopEvents.IS_INTERVENTION
             ):
@@ -774,7 +807,7 @@ def check_nan_in_transition(
             nan_detected = True
             if raise_error:
                 raise ValueError(f"NaN detected in observations[{key}]")
-            
+
     # Check next state
     for key, tensor in next_state.items():
         if torch.isnan(tensor).any():
@@ -782,14 +815,14 @@ def check_nan_in_transition(
             nan_detected = True
             if raise_error:
                 raise ValueError(f"NaN detected in next_state[{key}]")
-            
+
     # Check actions
     if torch.isnan(actions).any():
         logging.error("actions contains NaN values")
         nan_detected = True
         if raise_error:
             raise ValueError("NaN detected in actions")
-        
+
     return nan_detected
 
 def process_interaction_messages(
@@ -798,8 +831,16 @@ def process_interaction_messages(
     wandb_logger: WandBLogger | None,
     shutdown_event: any,
 ) -> dict | None:
-    """
-    Process all interaction messages from the queue
+    """Process all available interaction messages from the queue.
+
+    Args:
+        interaction_message_queue: Queue for receiving interaction messages
+        interaction_step_shift: Amount to shift interaction step by
+        wandb_logger: Logger for tracking progress
+        shutdown_event: Event to signal shutdown
+
+    Returns:
+        dict | None: The last interaction message processed, or None if none were processed
     """
     last_message = None
     while not interaction_message_queue.empty() and not shutdown_event.is_set():
@@ -809,7 +850,7 @@ def process_interaction_messages(
             interaction_step_shift=interaction_step_shift,
             wandb_logger=wandb_logger,
         )
-    
+
     return last_message
 
 def process_interaction_message(
@@ -836,7 +877,7 @@ def get_observation_features(
     """
     if policy.config.vision_encoder_name is None or not policy.config.freeze_vision_encoder:
         return None, None
-    
+
     with torch.no_grad():
         observation_features = policy.actor.encoder.get_cached_image_features(observations)
         next_observation_features = policy.actor.encoder.get_cached_image_features(next_observations)
@@ -872,7 +913,7 @@ def save_training_checkpoint(
         cfg=cfg,
         policy=policy,
         optimizer=optimizers,
-        scheduler=None
+        scheduler=None,
     )
 
     # Save interaction step manually
@@ -892,7 +933,7 @@ def save_training_checkpoint(
 
     # Save dataset
     # NOTE: Handle the case where the dataset repo id is not specified in the config
-    # e.g. RL training without demonstrations data
+    # eg. RL training without demonstrations data
     repo_id_buffer_save = cfg.env.task if dataset_repo_id is None else dataset_repo_id
     replay_buffer.to_lerobot_dataset(repo_id=repo_id_buffer_save, fps=fps, root=dataset_dir)
 
@@ -904,7 +945,7 @@ def save_training_checkpoint(
         offline_replay_buffer.to_lerobot_dataset(
             cfg.dataset.repo_id,
             fps=fps,
-            root=dataset_offline_dir
+            root=dataset_offline_dir,
         )
 
     logging.info("Resume training")
