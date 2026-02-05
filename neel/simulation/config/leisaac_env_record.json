@@ -50,10 +50,10 @@
         }
     },
     "dataset": {
-        "repo_id": "indraneelpatil/isaac_sim_pick_lift_sim7",
+        "repo_id": "indraneelpatil/isaac_sim_pick_lift_sim6",
         "root": null,
         "task": "LeIsaac-SO101-LiftCube-v0",
-        "num_episodes_to_record": 20,
+        "num_episodes_to_record": 30,
         "replay_episode": null,
         "push_to_hub": true
     },
