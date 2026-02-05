@@ -393,17 +393,8 @@ def add_actor_information_and_train(
         )
 
         # Wait until the replay buffer has enough samples to start training
-        buffer_size = len(replay_buffer)
-        if buffer_size < online_step_before_learning:
-            if buffer_size % 10 == 0 or buffer_size == 0:  # Log every 10 samples to avoid spam
-                logging.info(f"[LEARNER] Waiting for replay buffer to fill: {buffer_size}/{online_step_before_learning}")
+        if len(replay_buffer) < online_step_before_learning:
             continue
-        elif buffer_size == online_step_before_learning:
-            logging.info(f"[LEARNER] Replay buffer filled! Starting training with {buffer_size} samples")
-
-        # Log that we're entering training iteration
-        if optimization_step % 100 == 0:  # Log every 100 steps to avoid spam
-            logging.info(f"[LEARNER] Training iteration: optimization_step={optimization_step}, buffer_size={len(replay_buffer)}")
 
         if online_iterator is None:
             online_iterator = replay_buffer.get_iterator(
