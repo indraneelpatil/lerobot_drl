@@ -7,12 +7,15 @@ based on transitions received from the actor server
 
 python -m simulation.learner --config_path simulation/config/gym_hil_env_train.json
 python -m simulation.learner --config_path simulation/config/isaac_gym_env_train.json
+python -m simulation.learner --config_path simulation/config/real_robot_env_train.json
+
 
 """
 import logging
 import os
 import time
 import shutil
+from pprint import pformat
 
 import grpc
 from termcolor import colored
@@ -22,6 +25,7 @@ from torch.multiprocessing import Queue
 from concurrent.futures import ThreadPoolExecutor
 from torch.optim.optimizer import Optimizer
 
+from lerobot.cameras import opencv  # noqa: F401
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.factory import make_dataset
 from lerobot.configs.train import TrainRLServerPipelineConfig
@@ -64,8 +68,10 @@ from lerobot.teleoperators import (
     gamepad,  # noqa: F401
     keyboard,  # noqa: F401
     make_teleoperator_from_config,
-    so101_leader,  # noqa: F401
+    so_leader,  # noqa: F401
 )
+from lerobot.robots import so_follower  # noqa: F401
+import lerobot.teleoperators.so_leader.so_leader
 
 from .learner_service import MAX_WORKERS, SHUTDOWN_TIMEOUT, LearnerService
 
@@ -561,8 +567,6 @@ def add_actor_information_and_train(
                 training_infos["temperature_grad_norm"] = temp_grad_norm
                 training_infos["temperature"] = policy.temperature
 
-                # Update temperature
-                policy.update_temperature()
 
         # Push policy to actors if needed
         if time.time() - last_time_policy_pushed > policy_parameters_push_frequency:
