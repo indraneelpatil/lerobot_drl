@@ -83,30 +83,6 @@ hc_joint_names = ["shoulder_pan",
                   "gripper"]
 
 
-class PadActionForKeyboardEE(ProcessorStep):
-    """Pad 3-element keyboard_ee actions to 4 elements by adding gripper=0."""
-
-    def transform_features(self, features):
-        """Required abstract method - return features unchanged."""
-        return features
-
-    def action(self, action):
-        """Pad 3-element action to 4 elements."""
-        if action is not None and len(action) == 3:
-            # Pad with 0 for gripper (no change)
-            import torch
-            import numpy as np
-            if isinstance(action, torch.Tensor):
-                action = torch.cat([action, torch.zeros(1, dtype=action.dtype, device=action.device)])
-            else:
-                action = np.concatenate([action, np.zeros(1, dtype=action.dtype)])
-        return action
-
-    def __call__(self, transition: EnvTransition) -> EnvTransition:
-        """Process the transition and pad the action if needed."""
-        # The action() method handles the padding
-        return transition
-
 
 def make_robot_env(cfg: HILSerlRobotEnvConfig, device: str) -> tuple[gym.Env, Any]:
     """Create robot environment
@@ -560,23 +536,10 @@ def make_processors(
         action_pipeline_steps = [
             AddTeleopActionAsComplimentaryDataStep(teleop_device=teleop_device),
             AddTeleopEventsAsInfoStep(teleop_device=teleop_device),
-        ]
-
-        # Convert teleop_action from joint space to delta x, y, z if kinematics solver is available
-        if kinematics_solver is not None:
-            action_pipeline_steps.append(
-                TeleopConvertJointToDeltaStep(
-                    kinematics=kinematics_solver,
-                    motor_names=joint_names,
-                    use_gripper=cfg.processor.gripper.use_gripper if cfg.processor.gripper is not None else False,
-                )
-            )
-
-        action_pipeline_steps.append(
             InterventionActionProcessorStep(
                 use_gripper=cfg.processor.gripper.use_gripper if cfg.processor.gripper is not None else False,
                 terminate_on_success=terminate_on_success),
-        )
+        ]
 
         # Replace InverseKinematicsProcessor with new kinematic processors
         if cfg.processor.inverse_kinematics is not None and kinematics_solver is not None:

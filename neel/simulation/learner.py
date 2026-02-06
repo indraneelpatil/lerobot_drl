@@ -15,6 +15,7 @@ import logging
 import os
 import time
 import shutil
+from pprint import pformat
 
 import grpc
 from termcolor import colored
@@ -121,7 +122,7 @@ def train(cfg: TrainRLServerPipelineConfig, job_name: str | None = None):
     # Initialize logging with explicit log file
     init_logging(log_file=log_file, display_pid=display_pid)
     logging.info(f"Learner logging initialized, writing to {log_file}")
-    logging.info(format(cfg.to_dict()))
+    logging.info(pformat(cfg.to_dict()))
 
     # Setup WandB logging if enabled
     if cfg.wandb.enable and cfg.wandb.project:
