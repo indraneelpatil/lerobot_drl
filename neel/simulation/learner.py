@@ -7,7 +7,7 @@ based on transitions received from the actor server
 
 python -m simulation.learner --config_path simulation/config/gym_hil_env_train.json
 python -m simulation.learner --config_path simulation/config/isaac_gym_env_train.json
-python -m simulation.learner --config_path simulation/config/real_robot_env_train.json
+python -m simulation.learner --config_path robot/config/real_robot_env_train.json
 
 
 """

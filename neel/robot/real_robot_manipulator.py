@@ -3,7 +3,7 @@
 Real robot data collection script for SO101 follower + leader.
 
 Usage:
-    python -m neel.robot.real_robot_manipulator --config_path neel/simulation/config/real_robot_env_record.json
+    python -m neel.robot.real_robot_manipulator --config_path neel/robot/config/real_robot_env_record.json
 """
 
 from lerobot.teleoperators.teleoperator import Teleoperator
