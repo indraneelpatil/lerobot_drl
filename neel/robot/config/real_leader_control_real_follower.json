@@ -6,12 +6,12 @@
         "robot": {
             "type": "so101_follower",
             "id": "singles_inferno_dex_follower",
-            "port": "/dev/tty.usbmodem5AB01818051"
+            "port": "/dev/ttyACM0"
         },
         "teleop": {
             "type": "so101_leader_with_interventions",
             "id": "singles_inferno_dex_leader",
-            "port": "/dev/tty.usbmodem5AB01789611"
+            "port": "/dev/ttyACM1"
         },
         "processor": {
             "control_mode": "keyboard",
@@ -26,12 +26,12 @@
             },
             "reset": {
                 "fixed_reset_joint_positions": [0.0, 0.0, 0.0, 90.0, 0.0, 30.0],
-                "reset_time_s": 2.0,
+                "reset_time_s": 10.0,
                 "control_time_s": 300.0,
                 "terminate_on_success": false
             },
             "inverse_kinematics": {
-                "urdf_path": "assets/robots/so101.urdf",
+                "urdf_path": "../assets/robots/so101.urdf",
                 "target_frame_name": "gripper_frame_link",
                 "end_effector_bounds": {
                     "min": [0.195, -0.065, 0.005],
@@ -47,13 +47,13 @@
         }
     },
     "dataset": {
-        "repo_id": "indraneelpatil/isaac_sim_pick_lift_sim7",
+        "repo_id": "indraneelpatil/isaac_sim_pick_lift_sim8",
         "root": null,
-        "task": "LeIsaac-SO101-LiftCube-v0",
+        "task": "RealRobot-SO101-Plug-Charger",
         "num_episodes_to_record": 5,
         "replay_episode": null,
         "push_to_hub": true
     },
     "mode": "record",
-    "device": "cpu"
+    "device": "cuda"
 }

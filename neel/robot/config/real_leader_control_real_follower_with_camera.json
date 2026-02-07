@@ -10,14 +10,14 @@
             "cameras": {
                 "top": {
                     "type": "opencv",
-                    "index_or_path": 6,
+                    "index_or_path": 4,
                     "height": 480,
                     "width": 640,
                     "fps": 30
                 },
                 "wrist": {
                     "type": "opencv",
-                    "index_or_path": 4,
+                    "index_or_path": 8,
                     "height": 480,
                     "width": 640,
                     "fps": 30
@@ -41,12 +41,12 @@
             },
             "reset": {
                 "fixed_reset_joint_positions": [2, -20, -6.7, 100, -49, 1],
-                "reset_time_s": 2.0,
+                "reset_time_s": 10.0,
                 "control_time_s": 300.0,
                 "terminate_on_success": true
             },
             "inverse_kinematics": {
-                "urdf_path": "assets/robots/so101.urdf",
+                "urdf_path": "../assets/robots/so101.urdf",
                 "target_frame_name": "gripper_frame_link",
                 "end_effector_bounds": {
                     "min": [0.16, -0.06, 0.001],
@@ -68,13 +68,13 @@
         }
     },
     "dataset": {
-        "repo_id": "brucekimrok/real_robot_plug_charger_20_episodes",
+        "repo_id": "indraneelpatil/isaac_sim_pick_lift_sim9",
         "root": null,
-        "task": "Real-SO101-Plug-Charger-5-episodes-v1",
+        "task": "Real-SO101-Plug-Charger-20-episodes-v1",
         "num_episodes_to_record": 20,
         "replay_episode": null,
         "push_to_hub": true
     },
     "mode": "record",
-    "device": "cpu"
+    "device": "cuda"
 }

@@ -3,7 +3,8 @@
 Real robot data collection script for SO101 follower + leader.
 
 Usage:
-    python -m neel.robot.real_robot_manipulator --config_path neel/robot/config/real_robot_env_record.json
+    python -m robot.real_robot_manipulator --config_path robot/config/real_leader_control_real_follower.json
+    python -m robot.real_robot_manipulator --config_path robot/config/real_leader_control_real_follower_with_camera.json
 """
 
 from lerobot.teleoperators.teleoperator import Teleoperator
@@ -36,11 +37,12 @@ from lerobot.utils.robot_utils import busy_wait
 from lerobot.utils.constants import ACTION, DONE, OBS_IMAGES, OBS_STATE, REWARD
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.teleoperators.utils import TeleopEvents
+from lerobot.utils.utils import init_logging
 
 # Import from isaac_gym_utils (which now has real_robot support)
 import sys
 sys.path.append('/Users/sisaha/Documents/Personal dev/physicalaihack/lerobot_drl')
-from neel.simulation.isaac_gym_utils import (
+from simulation.isaac_gym_utils import (
     make_processors,
     make_robot_env,
     step_env_and_process_transition,
@@ -301,6 +303,7 @@ def control_loop(
 @parser.wrap()
 def main(cfg: GymManipulatorConfig):
     """Main entry point for real robot data collection."""
+    init_logging()
 
     logging.info("=" * 50)
     logging.info("Real Robot Data Collection")

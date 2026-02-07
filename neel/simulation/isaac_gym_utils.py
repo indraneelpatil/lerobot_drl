@@ -464,8 +464,11 @@ class RobotEnv(gym.Env):
         logging.info("[RobotEnv] Closing environment...")
         if hasattr(self.robot, "disconnect"):
             self.robot.disconnect()
-        if self.teleop_device is not None and hasattr(self.teleop_device, "disconnect"):
-            self.teleop_device.disconnect()
+        try:
+            if self.teleop_device is not None and hasattr(self.teleop_device, "disconnect"):
+                self.teleop_device.disconnect()
+        except:
+            print("Could not disconnect teleop device cleanly")
         super().close()
 
 
@@ -633,6 +636,7 @@ def make_processors(
                     kinematics=kinematics_solver,
                     motor_names=joint_names,
                     use_gripper=cfg.processor.gripper.use_gripper if cfg.processor.gripper is not None else False,
+                    error_buf = np.zeros(3)
                 )
             )
         action_pipeline_steps.append(
