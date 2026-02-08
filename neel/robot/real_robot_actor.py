@@ -218,8 +218,7 @@ def act_with_policy(
 
     logging.info("make_env online")
 
-    # TODO(Neel) Fix hardcoding
-    online_env, teleop_device = make_robot_env(cfg.env, device="cpu")
+    online_env, teleop_device = make_robot_env(cfg.env, device=cfg.policy.device)
     env_processor, action_processor = make_processors(online_env, teleop_device, cfg.env, cfg.policy.device)
 
     set_seed(cfg.seed)
