@@ -8,7 +8,9 @@ based on transitions received from the actor server
 python -m simulation.learner --config_path simulation/config/gym_hil_env_train.json
 python -m simulation.learner --config_path simulation/config/isaac_gym_env_train.json
 python -m simulation.learner --config_path robot/config/real_robot_env_train.json
-
+python -m simulation.learner \
+  --resume=true \
+  --config_path=outputs/train/2026-02-07/15-21-58_real_robot_lerobot_rl_sim_sac/checkpoints/last/pretrained_model/train_config.json
 
 """
 import logging
@@ -16,6 +18,7 @@ import os
 import time
 import shutil
 from pprint import pformat
+from pathlib import Path
 
 import grpc
 from termcolor import colored
@@ -44,7 +47,8 @@ from lerobot.utils.constants import (
 from lerobot.utils.train_utils import (
     get_step_checkpoint_dir,
     save_checkpoint,
-    update_last_checkpoint
+    update_last_checkpoint,
+    load_training_state as utils_load_training_state
 )
 from lerobot.utils.random_utils import set_seed
 from lerobot.utils.transition import move_state_dict_to_device, move_transition_to_device
@@ -682,7 +686,28 @@ def load_training_state(
     if not cfg.resume:
         return None, None
     
-    raise RuntimeError("Resume Not implemented")
+    # Construct path to the last checkpoint directory
+    checkpoint_dir = os.path.join(cfg.output_dir, CHECKPOINTS_DIR, LAST_CHECKPOINT_LINK)
+
+    logging.info(f"Loading training state from {checkpoint_dir}")
+
+    try:
+        # Use the utility function from train utils which loads the optimizer state
+        step, optimizers, _ = utils_load_training_state(Path(checkpoint_dir), optimizers, None)
+
+        # Load interaction step separately from training_state.pt
+        training_state_path = os.path.join(checkpoint_dir, TRAINING_STATE_DIR, "training_state.pt")
+        interaction_step = 0
+        if os.path.exists(training_state_path):
+            training_state = torch.load(training_state_path, weights_only=False)
+            interaction_step = training_state.get("interaction_step", 0)
+
+        logging.info(f"Resuming from step {step}, interaction step {interaction_step}")
+        return step, interaction_step
+
+    except Exception as e:
+        logging.error(f"Failed to load training state: {e}")
+        return None,None
     
 
 def log_training_info(cfg: TrainRLServerPipelineConfig, policy: nn.Module)-> None:
@@ -716,7 +741,24 @@ def initialize_replay_buffer(
             optimize_memory=True,
         )
     
-    raise RuntimeError("Resuming not implemented")
+    logging.info("Resume training load the online dataset")
+    dataset_path = os.path.join(cfg.output_dir, "dataset")
+
+    # NOTE: In RL is possible to not have a dataset.
+    repo_id = None
+    if cfg.dataset is not None:
+        repo_id = cfg.dataset.repo_id
+    dataset = LeRobotDataset(
+        repo_id=repo_id,
+        root=dataset_path,
+    )
+    return ReplayBuffer.from_lerobot_dataset(
+        lerobot_dataset=dataset,
+        capacity=cfg.policy.online_buffer_capacity,
+        device=device,
+        state_keys=cfg.policy.input_features.keys(),
+        optimize_memory=True
+    )
 
 
 def initialize_offline_replay_buffer(

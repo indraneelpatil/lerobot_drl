@@ -6,7 +6,9 @@ Real robot actor process
 
 
 python -m robot.real_robot_actor --config_path robot/config/real_robot_env_train.json
-
+python -m robot.real_robot_actor \
+  --resume=true \
+  --config_path=outputs/train/2026-02-07/15-21-58_real_robot_lerobot_rl_sim_sac/checkpoints/last/pretrained_model/train_config.json
 """
 
 from lerobot.teleoperators.teleoperator import Teleoperator
@@ -60,14 +62,14 @@ from lerobot.utils.utils import (
     init_logging,
 )
 
-from neel.simulation.isaac_gym_utils import (
+from simulation.isaac_gym_utils import (
     create_transition,
     make_processors,
     make_robot_env,
     step_env_and_process_transition,
 )
 
-from neel.simulation.actor import (
+from simulation.actor import (
     establish_learner_connection,
     learner_service_client,
     receive_policy,
