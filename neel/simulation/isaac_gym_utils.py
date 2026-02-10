@@ -208,7 +208,7 @@ class IsaacSimEnvWrapper(gym.Wrapper):
         joint_positions = np.array([joint_angle_dict[f"{name}.pos"] for name in hc_joint_names])
 
         # Process images
-        camera_keys = ["front", "wrist"]
+        camera_keys = ["top", "wrist"]
         images = {key: policy_obs[key] for key in camera_keys}
 
         return {"agent_pos": joint_positions, "pixels": images, **joint_angle_dict}

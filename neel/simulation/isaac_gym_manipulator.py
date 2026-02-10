@@ -7,10 +7,6 @@ python -m simulation.isaac_gym_manipulator --config_path simulation/config/leisa
 
 
 """Launch Isaac Sim Simulator first."""
-import multiprocessing
-if multiprocessing.get_start_method() != "spawn":
-    multiprocessing.set_start_method("spawn", force=True)
-
 from isaaclab.app import AppLauncher
 
 # isaac sim args
