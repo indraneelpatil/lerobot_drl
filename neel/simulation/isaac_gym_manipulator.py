@@ -248,8 +248,9 @@ def control_loop(env: gym.Env,
 
     if dataset is not None and cfg.dataset.push_to_hub:
         logging.info("Pushing dataset to hub")
+        dataset.finalize()
         dataset.push_to_hub()
-
+        logging.info("Dataset pushed successfully")
 
 
 @parser.wrap()

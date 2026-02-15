@@ -36,21 +36,21 @@
                     ]
                 },
                 "end_effector_step_sizes": {
-                "x": 0.025,
-                "y": 0.025,
-                "z": 0.025
+                "x": 0.02,
+                "y": 0.02,
+                "z": 0.02
                 }
             },
-             "image_preprocessing": {
+            "image_preprocessing": {
                 "crop_params_dict": {
-                  "observation.images.top": [49, 189, 262, 305]
+                    "observation.images.top": [52, 124, 362, 387]
                 },
                 "resize_size": [128, 128]            
             }
         }
     },
     "dataset": {
-        "repo_id": "indraneelpatil/isaac_sim_pick_lift_sim7",
+        "repo_id": "indraneelpatil/new_isaac_sim_pick_lift_sim5",
         "root": null,
         "task": "LeIsaac-SO101-LiftCube-v0",
         "num_episodes_to_record": 20,
