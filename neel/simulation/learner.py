@@ -1030,6 +1030,10 @@ def handle_resume_logic(cfg: TrainRLServerPipelineConfig) -> TrainRLServerPipeli
 
     # Ensure resume flag is set in returned config
     checkpoint_cfg.resume = True
+    checkpoint_cfg.checkpoint_path = cfg.checkpoint_path
+    if checkpoint_cfg.policy is not None and checkpoint_cfg.policy.pretrained_path is None and cfg.policy is not None:
+        checkpoint_cfg.policy.pretrained_path = cfg.policy.pretrained_path
+
     return checkpoint_cfg
 
 
