@@ -7,7 +7,7 @@ Inference process in isaac sim
 
 python -m simulation.isaac_gym_inference \
   --resume=true \
-  --config_path=outputs/train/2026-02-07/15-21-58_real_robot_lerobot_rl_sim_sac/checkpoints/last/pretrained_model/train_config.json
+  --config_path=outputs/train/2026-02-15/15-40-38_lerobot_rl_sim_sac/checkpoints/last/pretrained_model/train_config.json
 
 """
 
@@ -132,7 +132,7 @@ def inference_cli(cfg: TrainRLServerPipelineConfig):
         shutdown_event=shutdown_event
     )
 
-    logging.info("[ACTOR] Policy process joined")
+    logging.info("[INFERENCE] Policy process joined")
 
 
 def act_with_policy(

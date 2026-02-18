@@ -60,7 +60,7 @@
             },
             "image_preprocessing": {
                 "crop_params_dict": {
-                  "observation.images.top": [0, 48, 482, 571]
+                  "observation.images.top": [3, 137, 426, 455]
                 },
                 "resize_size": [128, 128]            
             },
@@ -68,10 +68,10 @@
         }
     },
     "dataset": {
-        "repo_id": "indraneelpatil/new_real_robot_pick_lift3",
+        "repo_id": "indraneelpatil/new_real_robot_pick_cube1",
         "root": null,
         "task": "Real-SO101-Plug-Charger-20-episodes-v1",
-        "num_episodes_to_record": 20,
+        "num_episodes_to_record": 2,
         "replay_episode": null,
         "push_to_hub": true
     },

@@ -6,24 +6,24 @@ from datasets import load_dataset
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 import matplotlib.pyplot as plt
 
-ds = LeRobotDataset(repo_id="indraneelpatil/franka_sim_pick_lift_sim4")
+ds = LeRobotDataset(repo_id="indraneelpatil/new_isaac_sim_pick_lift_sim5")
 # ds = LeRobotDataset("/home/neel/.cache/huggingface/lerobot/indraneelpatil/isaac_sim_pick_lift_sim7")
 
-sample = ds[300]
+sample = ds[40]
 
 print(sample)
 
-front = sample["observation.images.front"]
+top = sample["observation.images.top"]
 wrist = sample["observation.images.wrist"]
 
-front = front.permute(1, 2, 0).cpu().numpy()
+top = top.permute(1, 2, 0).cpu().numpy()
 wrist = wrist.permute(1, 2, 0).cpu().numpy()
 
 plt.figure(figsize=(10,4))
 
 plt.subplot(1,2,1)
-plt.imshow(front)
-plt.title("Front camera")
+plt.imshow(top)
+plt.title("top camera")
 plt.axis("off")
 
 plt.subplot(1,2,2)
