@@ -33,8 +33,8 @@
                 "urdf_path": "assets/robots/so101.urdf",
                 "target_frame_name": "gripper_frame_link",
                 "end_effector_bounds": {
-                    "min": [0.195, -0.065, 0.005],
-                    "max": [0.25, 0.065, 0.1]
+                    "max": [0.32, 0.142, 0.20],
+                    "min": [0.05, -0.20, 0.01]
                 },
                 "end_effector_step_sizes": {
                     "x": 0.025,
