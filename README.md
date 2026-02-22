@@ -105,3 +105,26 @@ Deep Reinforcement Learning Experiments with lerobot
 | Total                 | -                                     | 45 hours  |-           |
 
 
+### Experiments
+
+
+#### Sim One Shot Inference
+1. This works! Robot is able to pick up the cube almost every time
+
+
+#### Sim to Real One Shot
+1. TODO
+
+#### Sim to Real RL
+1. Robot isnt even going towards the red cube
+2. Robot seems to go towards the shadows?
+3. Is the calibration off between sim and real
+4. Giving zero reward for following shadow helped a little bit but learning is really slow
+5. Different colour of the robot might be throwing it off also
+6. Wrist camera sees stuff in the background which it has never seen before
+7. Robot does a lot of unecessary exploration: is the workspace too big? Maybe the demos have very small workspace
+8. Final intervention policy: Let the policy do something it pleases and then give 0 reward, and then give targeted interventions to keep robot on ideal trajectory to get reward +1 
+9. Robot started picking up the cube after 4 hours of real life training
+
+#### Real RL
+1. TODO
