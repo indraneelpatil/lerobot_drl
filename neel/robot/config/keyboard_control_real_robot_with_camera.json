@@ -10,14 +10,14 @@
             "cameras": {
                 "top": {
                     "type": "opencv",
-                    "index_or_path": 4,
+                    "index_or_path": 8,
                     "height": 480,
                     "width": 640,
                     "fps": 30
                 },
                 "wrist": {
                     "type": "opencv",
-                    "index_or_path": 6,
+                    "index_or_path": 2,
                     "height": 480,
                     "width": 640,
                     "fps": 30

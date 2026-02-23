@@ -4,7 +4,7 @@ Created by Indraneel on 02/17/2026
 
 Real robot inference process
 
-python -m actor.real_robot_inference \
+python -m robot.real_robot_inference \
   --resume=true \
   --config_path=outputs/train/2026-02-15/15-40-38_lerobot_rl_sim_sac/checkpoints/last/pretrained_model/train_config.json
 
