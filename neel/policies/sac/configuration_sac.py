@@ -8,14 +8,49 @@ from dataclasses import dataclass, field
 
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.types import NormalizationMode
+from lerobot.optim.schedulers import LRSchedulerConfig
 from lerobot.utils.constants import ACTION, OBS_IMAGE, OBS_STATE
+from lerobot.optim.optimizers import MultiAdamConfig
 
+
+def is_image_feature(key: str) -> bool:
+    """Check if feature key represents image feature"""
+    return key.startswith(OBS_IMAGE)
 
 @dataclass
 class CriticNetworkConfig:
     hidden_dims: list[int] = field(default_factory=lambda: [256, 256])
     activate_final: bool = True
     final_activation: str | None = None
+
+@dataclass
+class ConcurrencyConfig:
+    """
+    Docstring for ConcurrencyConfig
+
+    Can be either threads or processes
+    """
+    actor: str = "threads"
+    learner: str = "threads"
+
+@dataclass
+class ActorLearnerConfig:
+    learner_host: str = "127.0.0.1"
+    learner_port: int = 50051
+    policy_parameters_push_frequency: int = 4
+    queue_get_timeout: float = 2
+
+@dataclass
+class ActorNetworkConfig:
+    hidden_dims: list[int] = field(default_factory=lambda: [256, 256])
+    activate_final:bool = True
+
+@dataclass
+class PolicyConfig:
+    use_tanh_squash: bool = True
+    std_min: float = 1e-5
+    std_max: float = 10.0
+    init_final: float = 0.05
 
 @PreTrainedConfig.register_subclass("sac")
 @dataclass
@@ -117,4 +152,64 @@ class SACConfig(PreTrainedConfig):
 
     # Network configuration
     # Configuration for the critic network architecture
-    critic_network_kwargs: CriticNetworkConfig
+    critic_network_kwargs: CriticNetworkConfig = field(default_factory=CriticNetworkConfig)
+    # Config for actor network architecture
+    actor_network_kwargs: ActorNetworkConfig = field(default_factory=ActorNetworkConfig)
+    # Config for the policy parameters
+    policy_kwargs: PolicyConfig= field(default_factory=PolicyConfig)
+    # Configuration for the discrete critic network
+    discrete_critic_network_kwargs: CriticNetworkConfig = field(default_factory=CriticNetworkConfig)
+    # Configuration for actor-learner architecture
+    actor_learner_config: ActorLearnerConfig = field(default_factory=ActorLearnerConfig)
+    # Configuration for concurrency settings
+    concurrency: ConcurrencyConfig = field(default_factory=ConcurrencyConfig)
+
+    # Optimizations
+    use_torch_compile: bool = True
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Any validation specific to SAC configuration
+    
+    def get_optimizer_preset(self) -> MultiAdamConfig:
+        return MultiAdamConfig(
+            weight_decay=0.0,
+            optimizer_groups={
+                "actor": {"lr": self.actor_lr},
+                "critic": {"lr": self.critic_lr},
+                "temperature": {"lr": self.temperature_lr}
+            }
+        )
+    
+    def get_scheduler_preset(self) -> None:
+        return None
+
+
+    def validate_features(self) -> None:
+        has_image = any(is_image_feature(key) for key in self.input_features)
+        has_state = OBS_STATE in self.input_features
+
+        if not (has_state or has_image):
+            raise ValueError(
+                "You must provide either `observation.state` or an image observation"
+            )
+
+        if ACTION not in self.output_features:
+            raise ValueError("You must provide 'action` in the output features")
+    
+    @property
+    def image_features(self) -> list[str]:
+        return [key for key in self.input_features if is_image_feature(key)]
+    
+    @property
+    def observation_delta_indices(self) -> list:
+        return None
+    
+
+    @property
+    def action_delta_indices(self) -> list:
+        return None # SAC typically predicts one action at a time
+    
+    @property
+    def reward_delta_indices(self) -> None:
+        return None
