@@ -148,6 +148,8 @@ class SACObservationEncoder(nn.Module):
         super().__init__()
         self.config = config
         self._init_image_layers()
+        self._init_state_layers()
+        self._compute_output_dim()
 
     def _init_image_layers(self) -> None:
         self.image_keys = [k for k in self.config.input_features if is_image_feature(k)]
@@ -187,6 +189,34 @@ class SACObservationEncoder(nn.Module):
                 nn.LayerNorm(normalized_shape=self.config.latent_dim),
                 nn.Tanh()
             )
+
+    def _init_state_layers(self) -> None:
+        self.has_env = OBS_ENV_STATE in self.config.input_features
+        self.has_state = OBS_STATE in self.config.input_features
+        if self.has_env:
+            dim = self.config.input_features[OBS_ENV_STATE].shape[0]
+            self.env_encoder = nn.Sequential(
+                nn.Linear(dim, self.config.latent_dim),
+                nn.LayerNorm(self.config.latent_dim),
+                nn.Tanh()
+            )
+        if self.has_state:
+            dim = self.config.input_features[OBS_STATE].shape[0]
+            self.state_encoder = nn.Sequential(
+                nn.Linear(dim, self.config.latent_dim),
+                nn.LayerNorm(self.config.latent_dim),
+                nn.Tanh(),
+            )
+
+    def _compute_output_dim(self) -> None:
+        out = 0
+        if self.has_images:
+            out += len(self.image_keys) * self.config.latent_dim
+        if self.has_env:
+            out += self.config.latent_dim
+        if self.has_state:
+            out += self.config.latent_dim
+        self._out_dim = out
 
 
 
