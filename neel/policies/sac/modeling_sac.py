@@ -7,6 +7,7 @@ Reimplementation of the Soft Actor Critic Policy
 
 import torch.nn as nn
 import torch
+from collections.abc import Callable
 
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.utils.constants import ACTION, OBS_ENV_STATE, OBS_STATE
@@ -32,6 +33,7 @@ class SACPolicy(
         # Determine action dimension and initialize all components
         continuous_action_dim = config.output_features[ACTION].shape[0]
         self._init_encoders()
+        self._init_critics(continuous_action_dim)
 
 
     def _init_encoders(self):
@@ -41,6 +43,14 @@ class SACPolicy(
         self.encoder_actor = (
             self.encoder_critic if self.shared_encoder else SACObservationEncoder(self.config)
         )
+
+    def _init_critics(self, continuous_action_dim):
+        """Build critic ensemble, targets and optional discrete critic."""
+        heads = [
+            CriticHead(
+
+            )
+        ]
 
 
 class PretrainedImageEncoder(nn.Module):
@@ -217,6 +227,79 @@ class SACObservationEncoder(nn.Module):
         if self.has_state:
             out += self.config.latent_dim
         self._out_dim = out
+
+class MLP(nn.Module):
+    """Multi layer perceptron builder"""
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dims: list[int],
+        activations: Callable[[torch.Tensor], torch.Tensor] | str = nn.SiLU(),
+        activate_final: bool = False,
+        dropout_rate: float | None = None,
+        final_activation: Callable[[torch.Tensor], torch.Tensor] | str | None = None,    
+    ):
+        super().__init__()
+        layers: list[nn.Module] = []
+        in_dim = input_dim
+        total = len(hidden_dims)
+
+        for idx, out_dim in enumerate(hidden_dims):
+            # 1. Linear Transform
+            layers.append(nn.Linear(in_dim, out_dim))
+
+            is_last = idx == total - 1
+            # 2-4. Add dropout, normalization and activation
+            if not is_last or activate_final:
+                if dropout_rate and dropout_rate > 0:
+                    layers.append(nn.Dropout(p=dropout_rate))
+                layers.append(nn.LayerNorm(out_dim))
+                act_cls = final_activation if is_last and final_activation else activations
+                act = act_cls if isinstance(act_cls, nn.Module) else getattr(nn, act_cls)()
+                layers.append(act)
+
+            in_dim = out_dim
+
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+    
+class CriticHead(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dims: list[int],
+        activations: Callable[[torch.Tensor], torch.Tensor] | str = nn.SiLU(),
+        activate_final: bool = False,
+        dropout_rate: float | None = None,
+        init_final: float | None = None,
+        final_activation: Callable[[torch.Tensor], torch.Tensor] | str | None = None,
+    ):
+        super().__init__()
+        self.net = MLP(
+            input_dim=input_dim,
+            hidden_dims=hidden_dims,
+            activations=activations,
+            activate_final=activate_final,
+            dropout_rate=dropout_rate,
+            final_activation=final_activation,
+        )
+        self.output_layer = nn.Linear(in_features=hidden_dims[-1], out_features=1)
+        if init_final is not None:
+            nn.init.uniform_(self.output_layer.weight, -init_final, init_final)
+            nn.init.uniform_(self.output_layer.bias, -init_final, init_final)
+        else:
+            orthogonal_init()(self.output_layer.weight)
+
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.output_layer(self.net(x))
+    
+
+def orthogonal_init():
+    return lambda x: torch.nn.init.orthogonal_(x, gain=1.0)
 
 
 
