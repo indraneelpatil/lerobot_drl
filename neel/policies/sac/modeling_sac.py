@@ -8,8 +8,10 @@ Reimplementation of the Soft Actor Critic Policy
 import torch.nn as nn
 import torch
 from collections.abc import Callable
+from dataclasses import asdict
 
 from lerobot.policies.pretrained import PreTrainedPolicy
+from lerobot.policies.utils import get_device_from_parameters
 from lerobot.utils.constants import ACTION, OBS_ENV_STATE, OBS_STATE
 
 from policies.sac.configuration_sac import SACConfig, is_image_feature
@@ -48,9 +50,45 @@ class SACPolicy(
         """Build critic ensemble, targets and optional discrete critic."""
         heads = [
             CriticHead(
-
+                input_dim=self.encoder_critic.output_dim + continuous_action_dim,
+                **asdict(self.config.critic_network_kwargs),
             )
+            for _ in range(self.config.num_critics)
         ]
+        self.critic_ensemble = CriticEnsemble(encoder=self.encoder_critic, ensemble=heads)
+        target_heads = [
+            CriticHead(
+                input_dim=self.encoder_critic.output_dim + continuous_action_dim,
+                **asdict(self.config.critic_network_kwargs),
+            )
+            for _ in range(self.config.num_critics)
+        ]
+        self.critic_target = CriticEnsemble(encoder=self.encoder_critic, ensemble=target_heads)
+        self.critic_target.load_state_dict(self.critic_ensemble.state_dict())
+
+        if self.config.use_torch_compile:
+            self.critic_ensemble = torch.compile(self.critic_ensemble)
+            self.critic_target = torch.compile(self.critic_target)
+
+        if self.config.num_discrete_actions is not None:
+            self._init_discrete_critics()
+
+    def _init_discrete_critics(self):
+        "Build discrete critic ensemble and target networks"
+        self.discrete_critic = DiscreteCritic(
+            encoder=self.encoder_critic,
+            input_dim=self.encoder_critic.output_dim,
+            output_dim=self.config.num_discrete_actions,
+            **asdict(self.config.discrete_critic_network_kwargs)
+        )
+        self.discrete_critic_target = DiscreteCritic(
+            encoder=self.encoder_critic,
+            input_dim=self.encoder_critic.output_dim,
+            output_dim=self.config.num_discrete_actions,
+            **asdict(self.config.discrete_critic_network_kwargs),
+        )
+
+        self.discrete_critic_target.load_state_dict(self.discrete_critic.state_dict())
 
 
 class PretrainedImageEncoder(nn.Module):
@@ -301,6 +339,84 @@ class CriticHead(nn.Module):
 def orthogonal_init():
     return lambda x: torch.nn.init.orthogonal_(x, gain=1.0)
 
+class CriticEnsemble(nn.Module):
+    """
+    CriticEnsemble wraps multiple CriticHead modules into an ensemble
+    """
+    def __init__(
+        self,
+        encoder: SACObservationEncoder,
+        ensemble: list[CriticHead],
+        init_final: float | None = None,
+    ):
+        super().__init__()
+        self.encoder = encoder
+        self.init_final = init_final
+        self.critics = nn.ModuleList(ensemble)
+
+    def forward(
+        self,
+        observations: dict[str, torch.Tensor],
+        actions: torch.Tensor,
+        observation_features: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        device = get_device_from_parameters(self)
+        # Move each tensor in observations to device
+        observations = {k: v.to(device) for k, v in observations.items()}
+
+        obs_enc = self.encoder(observations, cache=observation_features)
+
+        inputs = torch.cat([obs_enc, actions], dim=-1)
+
+        # Loop through critics and collect outputs
+        q_values = []
+        for critic in self.critics:
+            q_values.append(critic(inputs))
+
+        # Stack outputs to match expected shape [num_critics, batch_size]
+        q_values = torch.stack([q.squeeze(-1) for q in q_values], dim=0)
+        return q_values
+    
+class DiscreteCritic(nn.Module):
+    def __init__(
+            self,
+            encoder: nn.Module,
+            input_dim: int,
+            hidden_dims: list[int],
+            output_dim: int = 3,
+            activations: Callable[[torch.Tensor], torch.Tensor] | str = nn.SiLU(),
+            activate_final: bool = False,
+            dropout_rate: float | None = None,
+            init_final: float | None = None,
+            final_activation: Callable[[torch.Tensor], torch.Tensor] | str | None = None,
+    ):
+        super().__init__()
+        self.encoder = encoder
+        self.output_dim = output_dim
+
+        self.net = MLP(
+            input_dim=input_dim,
+            hidden_dims=hidden_dims,
+            activations=activations,
+            activate_final=activate_final,
+            dropout_rate=dropout_rate,
+            final_activation=final_activation
+        )
+
+        self.output_layer = nn.Linear(in_features=hidden_dims[-1], out_features=self.output_dim)
+        if init_final is not None:
+            nn.init.uniform_(self.output_layer.weight, -init_final, init_final)
+            nn.init.uniform_(self.output_layer.bias, -init_final, init_final)
+        else:
+            orthogonal_init()(self.output_layer.weight)
+
+    def forward(
+        self, observations: torch.Tensor, observation_features: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        device = get_device_from_parameters(self)
+        observations = {k: v.to(device) for k,v in observations.items()}
+        obs_enc = self.encoder(observations, cache=observation_features)
+        return self.output_layer(self.net(obs_enc))
 
 
     
