@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch
 from collections.abc import Callable
 from dataclasses import asdict
+from torch.distributions import MultivariateNormal, TanhTransform, Transform, TransformedDistribution
 
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import get_device_from_parameters
@@ -36,6 +37,7 @@ class SACPolicy(
         continuous_action_dim = config.output_features[ACTION].shape[0]
         self._init_encoders()
         self._init_critics(continuous_action_dim)
+        self._init_actor(continuous_action_dim)
 
 
     def _init_encoders(self):
@@ -90,6 +92,15 @@ class SACPolicy(
 
         self.discrete_critic_target.load_state_dict(self.discrete_critic.state_dict())
 
+    def _init_actor(self, continuous_action_dim):
+        """ Initialize policy actor network"""
+        self.actor = Policy(
+            encoder=self.encoder_actor,
+            network=MLP(input_dim=self.encoder_actor.output_dim, **asdict(self.config.actor_network_kwargs)),
+            action_dim=continuous_action_dim,
+            encoder_is_shared=self.shared_encoder,
+            **asdict(self.config.policy_kwargs)
+        )
 
 class PretrainedImageEncoder(nn.Module):
     def __init__(self, config: SACConfig):
@@ -417,6 +428,156 @@ class DiscreteCritic(nn.Module):
         observations = {k: v.to(device) for k,v in observations.items()}
         obs_enc = self.encoder(observations, cache=observation_features)
         return self.output_layer(self.net(obs_enc))
+
+class Policy(nn.Module):
+    def __init__(
+        self,
+        encoder: SACObservationEncoder,
+        network: nn.Module,
+        action_dim: int,
+        std_min: float = -5,
+        std_max: float = 2,
+        fixed_std: torch.Tensor | None = None,
+        init_final: float | None = None,
+        use_tanh_squash: bool = False,
+        encoder_is_shared: bool = False,
+    ):
+        super().__init__()
+        self.encoder: SACObservationEncoder = encoder
+        self.network = network
+        self.action_dim = action_dim
+        self.std_min = std_min
+        self.std_max = std_max
+        self.fixed_std = fixed_std
+        self.use_tanh_squash = use_tanh_squash
+        self.encoder_is_shared = encoder_is_shared
+        
+        # find the last Linear layer's output dimension
+        for layer in reversed(network.net):
+            if isinstance(layer, nn.Linear):
+                out_features = layer.out_features
+                break
+        # Mean layer
+        self.mean_layer = nn.Linear(out_features, action_dim)
+        if init_final is not None:
+            nn.init.uniform_(self.mean_layer.weight, -init_final, init_final)
+            nn.init.uniform_(self.mean_layer.bias, -init_final, init_final)
+        else:
+            orthogonal_init()(self.mean_layer.weight)
+        
+        # Standard deviation layer or parameter
+        if fixed_std is None:
+            self.std_layer = nn.Linear(out_features, action_dim)
+            if init_final is not None:
+                nn.init.uniform_(self.std_layer.weight, -init_final, init_final)
+                nn.init.uniform_(self.std_layer.bias, -init_final, init_final)
+            else:
+                orthogonal_init()(self.std_layer.weight)
+        
+    def forward(
+        self,
+        observations: torch.Tensor,
+        observation_features: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # We detach the encoder if it is shared to avoid backprop through it
+        # this is important to avoid the encoder to be updated through policy
+        obs_enc = self.encoder(observations, cache=observation_features, detach=self.encoder_is_shared)
+
+        # Get network outputs
+        outputs = self.network(obs_enc)
+        means = self.mean_layer(outputs)
+
+        # Compute standard deviations
+        if self.fixed_std is None:
+            log_std = self.std_layer(outputs)
+            std = torch.exp(log_std)  # Match JAX "exp"
+            std = torch.clamp(std, self.std_min, self.std_max) # Match JAX default clip
+        else:
+            std = self.fixed_std.expand_as(means)
+
+        # Build transformed distribution
+        dist = TanhMultivariateNormalDiag(loc=means, scale_diag=std)
+
+        # Sample actions (reparameterized)
+        actions = dist.rsample()
+
+        # Compute log_probs
+        log_probs = dist.log_prob(actions)
+
+        return actions, log_probs, means
+    
+    def get_features(self, observations: torch.Tensor) -> torch.Tensor:
+        """Get encoded features from observations"""
+        device = get_device_from_parameters(self)
+        observations = observations.to(device)
+        if self.encoder is not None:
+            with torch.inference_mode():
+                return self.encoder(observations)
+        return observations
+
+class RescaleFromTanh(Transform):
+    def __init__(self, low: float = -1, high: float = 1):
+        super().__init__()
+
+        self.low = low
+        self.high = high
+    
+    def _call(self, x):
+        # Rescale from (-1, 1) to (low, high)
+
+        return 0.5 * (x + 1.0) * (self.high - self.low) + self.low
+    
+    def _inverse(self, y):
+        # Rescake from (low, high) back to (-1, 1)
+
+        return 2.0 * (y - self.low) / (self.high - self.low) - 1.0
+    
+    def log_abs_det_jacobian(self, x, y):
+        
+        scale = 0.5 * (self.high - self.low)
+
+        return torch.sum(torch.log(scale), dim=-1)
+
+
+class TanhMultivariateNormalDiag(TransformedDistribution):
+    def __init__(self, loc, scale_diag, low=None, high=None):
+        base_dist = MultivariateNormal(loc, torch.diag_embed(scale_diag))
+
+        transforms = [TanhTransform(cache_size=1)]
+
+        if low is not None and high is not None:
+            low = torch.as_tensor(low)
+
+            high = torch.as_tensor(high)
+
+            transforms.insert(0, RescaleFromTanh(low, high))
+        
+        super().__init__(base_dist, transforms)
+
+    def mode(self):
+        # Mode is mean of base distribution, passed through transforms
+
+        x = self.base_dist.mean
+
+        for transform in self.transforms:
+            x = transform(x)
+
+        return x
+    
+    def stddev(self):
+        std = self.base_dist.stddev
+
+        x = std
+
+        for transform in self.transforms:
+            x = transform(x)
+
+        return x
+
+        
+
+
+
 
 
     
