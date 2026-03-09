@@ -5,13 +5,17 @@ Created by Indraneel on 02/23/2026
 Reimplementation of the Soft Actor Critic Policy
 """
 
-import torch.nn as nn
-import torch
+import math
+from typing_extensions import Unpack
 from collections.abc import Callable
 from dataclasses import asdict
+
+import torch.nn as nn
+import torch
+from torch import Tensor
 from torch.distributions import MultivariateNormal, TanhTransform, Transform, TransformedDistribution
 
-from lerobot.policies.pretrained import PreTrainedPolicy
+from lerobot.policies.pretrained import ActionSelectKwargs, PreTrainedPolicy
 from lerobot.policies.utils import get_device_from_parameters
 from lerobot.utils.constants import ACTION, OBS_ENV_STATE, OBS_STATE
 
@@ -38,7 +42,47 @@ class SACPolicy(
         self._init_encoders()
         self._init_critics(continuous_action_dim)
         self._init_actor(continuous_action_dim)
+        self._init_temperature()
 
+    def get_optim_params(self) -> dict:
+        optim_params = {
+            "actor": [
+                p
+                for n,p in self.actor.named_parameters()
+                if not n.startswith("encoder") or not self.shared_encoder
+            ],
+            "critic": self.critic_ensemble.parameters(),
+            "temperature": self.log_alpha
+        }
+        if self.config.num_discrete_actions is not None:
+            optim_params["discrete_critic"] = self.discrete_critic.parameters()
+        return optim_params
+    
+    def reset(self):
+        """Reset the policy"""
+        pass
+
+    @torch.no_grad()
+    def predict_action_chunk(self, batch: dict[str, Tensor]) -> Tensor:
+        """Predict a chunk of actions given environment observations"""
+        raise NotImplementedError("SACPolicy does nto support action chunking. It returns single actions!")
+    
+    @torch.no_grad()
+    def select_action(self, batch: dict[str, Tensor]) -> torch.Tensor:
+        "Select action for inference/ evaluation"
+
+        observations_features = None
+        if self.shared_encoder and self.actor.encoder.has_images:
+            observations_features = self.actor.encoder.get_cached_image_features(batch)
+        
+        actions, _, _ = self.actor(batch, observations_features)
+
+        if self.config.num_discrete_actions is not None:
+            discrete_action_value = self.discrete_critic(batch, observations_features)
+            discrete_action = torch.argmax(discrete_action_value, dim=-1, keepdim=True)
+            actions = torch.cat([actions, discrete_action], dim=-1)
+
+        return actions
 
     def _init_encoders(self):
         """ Initialize shared or separate encoders for actor and critic"""
@@ -101,6 +145,11 @@ class SACPolicy(
             encoder_is_shared=self.shared_encoder,
             **asdict(self.config.policy_kwargs)
         )
+
+    def _init_temperature(self) -> None:
+        """Set up temperature parameter"""
+        temp_init = self.config.temperature_init
+        self.log_alpha = nn.Parameter(torch.tensor([math.log(temp_init)]))
 
 class PretrainedImageEncoder(nn.Module):
     def __init__(self, config: SACConfig):
@@ -276,6 +325,48 @@ class SACObservationEncoder(nn.Module):
         if self.has_state:
             out += self.config.latent_dim
         self._out_dim = out
+
+    def forward(
+        self, obs: dict[str, Tensor], cache: dict[str, Tensor] | None = None, detach: bool = False
+    ) -> Tensor:
+        parts = []
+        if self.has_images:
+            if cache is None:
+                cache = self.get_cached_image_features(obs)
+            parts.append(self._encode_images(cache, detach))
+        if self.has_env:
+            parts.append(self.env_encoder(obs[OBS_ENV_STATE]))
+        if self.has_state:
+            parts.append(self.state_encoder(obs[OBS_STATE]))
+        if parts:
+            return torch.cat(parts, dim=-1)
+
+        raise ValueError(
+            "No parts to concatenate, you should have atleast one image or environment state or state"
+        )
+    
+    def get_cached_image_features(self, obs: dict[str, Tensor]) -> dict[str, Tensor]:
+        """Run forward pass of the vision encoder, cache the result and reuse for actor, critic and discrete_critic"""
+        batched = torch.cat([obs[k] for k in self.image_keys], dim=0)
+        out = self.image_encoder(batched)
+        chunks = torch.chunk(out, len(self.image_keys), dim=0)
+        return dict(zip(self.image_keys, chunks, strict=False))
+    
+    def _encode_images(self, cache: dict[str, Tensor], detach:bool) -> Tensor:
+        """Takes preencoded image features and applies spatial embeddings and post-encoders"""
+        feats = []
+        for k, feat in cache.items():
+            safe_key = k.replace(".","_")
+            x = self.spatial_embeddings[safe_key](feat)
+            x = self.post_encoders[safe_key](x)
+            if detach:
+                x = x.detach()
+            feats.append(x)
+        return torch.cat(feats, dim=-1)
+    
+    @property
+    def output_dim(self) -> int:
+        return self._out_dim
 
 class MLP(nn.Module):
     """Multi layer perceptron builder"""
