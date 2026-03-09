@@ -9,6 +9,7 @@ import math
 from typing_extensions import Unpack
 from collections.abc import Callable
 from dataclasses import asdict
+from typing import Literal
 
 import torch.nn as nn
 import torch
@@ -21,7 +22,7 @@ from lerobot.utils.constants import ACTION, OBS_ENV_STATE, OBS_STATE
 
 from policies.sac.configuration_sac import SACConfig, is_image_feature
 
-
+DISCRETE_DIMENSION_INDEX = -1 # Gripper is always the last dimension
 
 class SACPolicy(
     PreTrainedPolicy
@@ -83,6 +84,114 @@ class SACPolicy(
             actions = torch.cat([actions, discrete_action], dim=-1)
 
         return actions
+
+    def critic_forward(
+        self,
+        observations: dict[str, Tensor],
+        actions: Tensor,
+        use_target: bool = False,
+        observation_features: Tensor | None = None,
+    ) -> Tensor:
+        """Forward pass through a critic network ensemble
+        
+            Returns:
+                Tensor of Q-values from all critics
+        """
+        critics = self.critic_target if use_target else self.critic_ensemble
+        q_values = critics(observations, actions, observation_features)
+        return q_values
+    
+    def discrete_critic_forward(
+        self, observations, use_target=False, observation_features=None
+    ) -> torch.Tensor:
+        """Forward pass through a discrete critic network"""
+        discrete_critic = self.discrete_critic_target if use_target else self.discrete_critic
+        q_values = discrete_critic(observations, observation_features)
+        return q_values
+    
+    def forward(
+        self,
+        batch: dict[str, Tensor | dict[str, Tensor]],
+        model: Literal["actor", "critic", "temperature", "discrete_critic"] = "critic",
+    ) -> dict[str, Tensor]:
+        """Compute the loss for the given model"""
+        # Extract common components from batch
+        actions: Tensor = batch[ACTION]
+        observations: dict[str, Tensor] = batch["state"]
+        observation_features: Tensor = batch.get("observation_feature")
+
+        if model == "critic":
+            # Extract critic specific components
+            rewards: Tensor = batch["reward"]
+            next_observations: dict[str, Tensor] = batch["next_state"]
+            done: Tensor = batch["done"]
+            next_observation_features: Tensor = batch.get("next_observation_feature")
+
+            loss_critic = self.compute_loss_critic(
+                observations=observations,
+                actions=actions,
+                rewards=rewards,
+                next_observations=next_observations,
+                done=done,
+                observation_features=observation_features,
+                next_observation_features=next_observation_features,
+            )  
+
+            return {"loss_critic": loss_critic}
+
+
+    def compute_loss_critic(
+        self,
+        observations,
+        actions,
+        rewards,
+        next_observations,
+        done,
+        observation_features: Tensor | None = None,
+        next_observation_features: Tensor | None = None 
+    ) -> Tensor:
+        with torch.no_grad():
+            next_action_preds, next_log_probs, _ = self.actor(next_observations, next_observation_features)
+
+            # 2 - compute q targets
+            q_targets = self.critic_forward(
+                observations=next_observations,
+                actions=next_action_preds,
+                use_target=True,
+                observation_features=next_observation_features
+            )
+
+            # subsample critics to prevent overfitting if use high UTD
+            if self.config.num_subsample_critics is not None:
+                indices=torch.randperm(self.config.num_critics)
+                indices = indices[: self.config.num_subsample_critics]
+                q_targets = q_targets[indices]
+            
+            # critics subsample size
+            min_q, _ = q_targets.min(dim=0)  # Get values from min operation
+            if self.config.use_backup_entropy:
+                min_q = min_q - (self.temperature * next_log_probs)
+            
+            td_target = rewards + (1-done) * self.config.discount *min_q
+
+        # 3 - compute predicted qs
+        if self.config.num_discrete_actions is not None:
+            # Note: We only want to keep the continuous action part
+            # In the buffer we have the full action space (continuous + discrete)
+            # We need to split them before concatenating them in the critic forward
+            actions: Tensor= actions[:, :DISCRETE_DIMENSION_INDEX]
+        q_preds = self.critic_forward(
+            observations=observations,
+            actions=actions,
+            use_target=False,
+            observation_features=observation_features,
+        )
+
+        # 4 - Calculate loss
+        # Compute state-action value loss (TD loss) for all of the Q functions in the ensemble
+        td_target_duplicate = einops.repeat()
+        
+
 
     def _init_encoders(self):
         """ Initialize shared or separate encoders for actor and critic"""
