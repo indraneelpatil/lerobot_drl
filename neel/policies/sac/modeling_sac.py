@@ -11,9 +11,11 @@ from collections.abc import Callable
 from dataclasses import asdict
 from typing import Literal
 
+import einops
 import torch.nn as nn
 import torch
 from torch import Tensor
+import torch.nn.functional as F
 from torch.distributions import MultivariateNormal, TanhTransform, Transform, TransformedDistribution
 
 from lerobot.policies.pretrained import ActionSelectKwargs, PreTrainedPolicy
@@ -189,9 +191,101 @@ class SACPolicy(
 
         # 4 - Calculate loss
         # Compute state-action value loss (TD loss) for all of the Q functions in the ensemble
-        td_target_duplicate = einops.repeat()
-        
+        td_target_duplicate = einops.repeat(td_target, "b -> e b",e=q_preds.shape[0])
+        # You compute the mean loss of the batch for each critic and then to compute the final loss you sum them up
+        critics_loss = (
+            F.mse_loss(
+                input=q_preds,
+                target=td_target_duplicate,
+                reduction="none",
+            ).mean(dim=1)
+        ).sum()
+        return critics_loss
+    
+    def compute_loss_discrete_critic(
+        self,
+        observations,
+        actions,
+        rewards,
+        next_observations,
+        done,
+        observation_features=None,
+        next_observation_features=None,
+        complementary_info=None
+    ):
+        # NOTE: We only want to keep the discrete action part
+        # In the buffer we have the full action space (continuous + discrete)
+        # We need to split them before concatenating them in the critic forward
+        actions_discrete: Tensor = actions[:, DISCRETE_DIMENSION_INDEX:].clone()
+        actions_discrete = torch.round(actions_discrete)
+        actions_discrete = actions_discrete.long()
 
+        discrete_penalties: Tensor | None = None
+        if complementary_info is not None:
+            discrete_penalties: Tensor | None = complementary_info.get("discrete_penalty")
+        
+        with torch.no_grad():
+            # For DQN, select actions using online network, evaluate with target network
+            next_discrete_qs = self.discrete_critic_forward(
+                next_observations, use_target=False, observation_features=next_observation_features
+            )
+            best_next_discrete_action = torch.argmax(next_discrete_qs, dim=-1, keepdim=True)
+
+            # Get target Q-values from target network
+            target_next_discrete_qs = self.discrete_critic_forward(
+                observations=next_observations,
+                use_target=True,
+                observation_features=next_observation_features
+            )
+
+            # Use gather to select Q-values for best actions
+            target_next_discrete_q = torch.gather(
+                target_next_discrete_qs, dim=1, index=best_next_discrete_action
+            ).squeeze(-1)
+
+            # Compute target Q-value with Bellman equation
+            rewards_discrete = rewards
+            if discrete_penalties is not None:
+                rewards_discrete = rewards + discrete_penalties
+            target_discrete_q = rewards_discrete + (1-done) * self.config.discount * target_next_discrete_q
+
+        # Get predicted Q-values for current observations
+        predicted_discrete_qs = self.discrete_critic_forward(
+            observations=observations, use_target=False, observation_features=observation_features
+        )
+
+        # Use gather to select Q-values for taken actions
+        predicted_discrete_q = torch.gather(predicted_discrete_qs, dim=1, index=actions_discrete).squeeze(-1)
+
+        # Compute MSE loss between predicted and target Q-values
+        discrete_critic_loss = F.mse_loss(input=predicted_discrete_q, target=target_discrete_q)
+        return discrete_critic_loss
+    
+    def compute_loss_temperature(self, observations, observation_features: Tensor | None = None) -> Tensor:
+        """Compute the temperature loss"""
+        # Calculate temperature loss
+        with torch.no_grad():
+            _, log_probs, _ = self.actor(observations, observation_features)
+        temperature_loss = (-self.log_alpha.exp() * (log_probs + self.target_entropy)).mean()
+        return temperature_loss
+
+    def compute_loss_actor(
+        self,
+        observations,
+        observation_features: Tensor | None = None,
+    ) -> Tensor:
+        actions_pi, log_probs, _ = self.actor(observations, observation_features)
+
+        q_preds = self.critic_forward(
+            observations=observations,
+            actions=actions_pi,
+            use_target=False,
+            observation_features=observation_features
+        )
+        min_q_preds = q_preds.min(dim=0)[0]
+
+        actor_loss = ((self.temperature * log_probs)- min_q_preds).mean()
+        return actor_loss
 
     def _init_encoders(self):
         """ Initialize shared or separate encoders for actor and critic"""
@@ -229,7 +323,7 @@ class SACPolicy(
             self._init_discrete_critics()
 
     def _init_discrete_critics(self):
-        "Build discrete critic ensemble and target networks"
+        """Build discrete critic ensemble and target networks"""
         self.discrete_critic = DiscreteCritic(
             encoder=self.encoder_critic,
             input_dim=self.encoder_critic.output_dim,
