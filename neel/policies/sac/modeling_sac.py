@@ -140,7 +140,69 @@ class SACPolicy(
             )  
 
             return {"loss_critic": loss_critic}
+        
+        if model == "discrete_critic" and self.config.num_discrete_actions is not None:
+            # Extract critic specific components
+            rewards: Tensor = batch["reward"]
+            next_observations: dict[str, Tensor] = batch["next_state"]
+            done: Tensor = batch["done"]
+            next_observation_features: Tensor = batch.get("next_observation_feature")
+            complementary_info = batch.get("complementary_info")
+            loss_discrete_critic = self.compute_loss_discrete_critic(
+                observations=observations,
+                actions=actions,
+                rewards=rewards,
+                next_observations=next_observations,
+                done=done,
+                observation_features=observation_features,
+                next_observation_features=next_observation_features,
+                complementary_info=complementary_info
+            )
+            return {"loss_discrete_critic" : loss_discrete_critic}
+        if model == "actor":
+            return {
+                "loss_actor": self.compute_loss_actor(
+                    observations=observations,
+                    observation_features=observation_features
+                )
+            }
+        if model == "temperature":
+            return {
+                "loss_temperature": self.compute_loss_temperature(
+                    observations=observations,
+                    observation_features=observation_features
+                )
+            }
+        
+        raise ValueError(f"Unknown model type: {model}")
 
+
+    def update_target_networks(self):
+        """Update target networks with exponential moving average"""
+        for target_param, param in zip(
+            self.critic_target.parameters(),
+            self.critic_ensemble.parameters(),
+            strict=True,
+        ):
+            target_param.data.copy_(
+                param.data * self.config.critic_target_update_weight
+                + target_param.data * (1.0 - self.config.critic_target_update_weight)
+            )
+        if self.config.num_discrete_actions is not None:
+            for target_param, param in zip(
+                self.discrete_critic_target.parameters(),
+                self.discrete_critic.parameters(),
+                strict=True
+            ):
+                target_param.data.copy_(
+                    param.data * self.config.critic_target_update_weight
+                    + target_param.data * (1.0 - self.config.critic_target_update_weight)
+                )
+
+    @property
+    def temperature(self) -> float:
+        """Return the current temperature value, always in sync with log alpha"""
+        return self.log_alpha.exp().item()
 
     def compute_loss_critic(
         self,
